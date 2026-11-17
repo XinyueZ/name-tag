@@ -1,0 +1,60 @@
+# Dependencies & package manager artifacts
+node_modules/
+.pnpm-store/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Compiled build outputs (rebuilt via `pnpm run build`)
+lib/
+dist/
+*.tsbuildinfo
+
+# Local ML models, WASM caches & runtime vector/preference stores
+models/
+.cache/
+faiss-index/
+*.onnx
+*.onnx_data
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.gguf
+*.pte
+*.wasm
+*.faiss
+*.index
+docstore.json
+preferences.json
+*.tmp-*
+
+# Secrets, environment variables & credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+.credentials*
+*credentials*.json
+*secret*.json
+
+# Logs & test coverage
+*.log
+npm-debug.log*
+pnpm-debug.log*
+coverage/
+.nyc_output/
+
+# OS, IDE & local agent workspace files
+.DS_Store
+._*
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/

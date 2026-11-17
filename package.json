@@ -1,0 +1,66 @@
+{
+  "name": "@deepseek-ai/dsh-client-name-tag",
+  "description": "Name Tag DSH Web Plugin: real-time class-agnostic object detection via FastSAM-s with Material Design 3 granularity control",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "tsc && tsdown",
+    "test": "node --test tests/*.test.mjs",
+    "bundle": "tsdown",
+    "watch": "tsdown --watch"
+  },
+  "dependencies": {
+    "onnxruntime-web": "^1.21.0",
+    "@huggingface/transformers": "^4.0.0",
+    "@langchain/core": "^1.0.0",
+    "@langchain/community": "^1.0.0",
+    "faiss-node": "^0.5.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=3.0.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:/Users/xinyue.zhao/Desktop/dev/AI/deepseek-harness/vendor/cordis",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "lib/types/**/*.d.ts"
+  ]
+}
