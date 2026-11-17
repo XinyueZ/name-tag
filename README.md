@@ -2,6 +2,10 @@
 
 A dedicated, permanent **DeepSeek Harness (DSH) Web** plugin for **client-side class-agnostic object segmentation, transparent cutout augmentation, multimodal embedding, and local vector-database recognition**.
 
+一个专为 **DeepSeek Harness (DSH) Web** 打造的永久集成插件，支持**浏览器端无类别物体分割、透明背景抠图增强、多模态向量编码与本地向量数据库识别**。
+
+![Name Tag Demo](./assets/name-tag-demo.gif)
+
 ---
 
 ## Table of Contents / 目录

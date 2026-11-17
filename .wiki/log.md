@@ -170,3 +170,7 @@ Chronological append-only log of project milestones, ingests, builds, and lint c
 - Added `RecognizedDetection` in `invariant.ts` and `PocketCaptureManager.trackRecognizedBoxes()` to smoothly snap recognized bounding boxes to live `FastSAM-s` segments via IoU.
 - Updated `CanvasOverlayRenderer.render()` in `CameraViewport.tsx` to draw a classic CV rectangle and top-left `title` tag around every recognized object independently of `showProbLabels`.
 - Updated `README.md` (EN & ZH) and added unit test coverage in `decoder-and-geometry.test.mjs`.
+
+## [2026-11-17] ingest | Convert screen recording to demo GIF and embed in README header
+- Converted `Screen Recording 2026-11-17 at 19.48.28.mov` (199.6 MB) to an optimized 8.73 MB loopable GIF at `assets/name-tag-demo.gif` (920px wide, 6 fps, 96-color diff palette).
+- Updated `README.md` header order to: Big Title -> English tagline -> Chinese translation -> Demo GIF -> Table of Contents.
