@@ -1,8 +1,8 @@
 # Name Tag (`@deepseek-ai/dsh-client-name-tag`)
 
-A dedicated, permanent **DeepSeek Harness (DSH) Web** plugin for **client-side class-agnostic object segmentation, transparent cutout augmentation, multimodal embedding, and local vector-database recognition**.
+A dedicated, permanent **DeepSeek Harness (DSH) Web** plugin for **100% client-side AI** — **class-agnostic object segmentation, transparent cutout augmentation, multimodal embedding, preferences, and vector-database recognition all run and persist strictly inside each user's browser** (`WebGPU/WASM` + `IndexedDB` + `localStorage`). Even when DSH is deployed in the cloud for multiple concurrent users, the server executes zero AI inference and stores zero user data or vectors, ensuring complete multi-user isolation and privacy.
 
-一个专为 **DeepSeek Harness (DSH) Web** 打造的永久集成插件，支持**浏览器端无类别物体分割、透明背景抠图增强、多模态向量编码与本地向量数据库识别**。
+一个专为 **DeepSeek Harness (DSH) Web** 打造的永久集成插件，坚持 **100% 纯客户端 AI 架构**——**无类别物体分割、透明背景抠图增强、多模态向量编码、偏好预设以及向量数据库读写全部在用户各自的浏览器本地完成与存储**（`WebGPU/WASM` + `IndexedDB` + `localStorage`）。即使将 DSH 部署在云端供多用户同时访问，服务端也不运行任何 AI 推理、不保存任何用户数据或向量，天然保证多用户完全隔离与隐私安全。
 
 ![Name Tag Demo](./assets/name-tag-demo.gif)
 
@@ -75,7 +75,7 @@ Open `http://127.0.0.1:3080` in a WebGPU-capable browser (Chrome / Edge / Safari
 | **CV Framework** | **`onnxruntime-web`** (WebGPU + WASM SIMD fallback) | Runs FastSAM-s locally inside the browser with zero server GPU cost, backed by local `/api/name-tag/ort/*` runtime hosting and 3-tier lazy-load caching (Browser IndexedDB → Host disk → HuggingFace). |
 | **Embedding Model** | **EmbeddingGemma 2** (`onnx-community/embeddinggemma-2-ONNX`, `q4`) | Google DeepMind's natively multimodal embedding model (768-dim L2-normalized vector space). Configured with `audio_config = null` so only the Vision (170M) + Text (270M) encoders load in the browser, compressing segmented object cutouts into semantic index vectors. |
 | **Embedding Runtime** | **`@huggingface/transformers` (Transformers.js v4)** | Runs EmbeddingGemma 2 in-browser (WebGPU primary, WASM fallback) and caches weights in Browser CacheStorage (`transformers-cache`), lazy-loaded in parallel with FastSAM-s upon starting the camera. |
-| **LLM / Vector Framework & DB** | **LangChain JS** (`@langchain/core`, `@langchain/community`) + **FAISS (`FaissStore`)** | All embedding abstractions (`Embeddings`), metadata documents (`Document`), vector indexing (`addVectors`), disk persistence (`save` / `load`), and similarity search (`similaritySearchVectorWithScore`) run strictly through **LangChain JS** interfaces rather than raw database APIs. `FaissStore` runs embedded inside the Node host (zero Docker/external DB server required) and persists to `~/.dsh/cache/name-tag/faiss-index`. |
+| **LLM / Vector Framework & DB** | **LangChain JS** (`@langchain/core`) + **Browser IndexedDB (`IndexedDbLangChainVectorStore`)** | All embedding abstractions (`Embeddings`), metadata documents (`Document`), vector indexing (`addVectors`), and cosine similarity search (`similaritySearchVectorWithScore`) run **100% client-side in the user's browser** through a custom **LangChain JS `VectorStore`** subclass persisted in Browser **IndexedDB** (`dsh-name-tag-vectors`). Multi-user cloud deployments remain completely isolated with zero server-side user data. |
 
 ---
 
@@ -85,8 +85,8 @@ Open `http://127.0.0.1:3080` in a WebGPU-capable browser (Chrome / Edge / Safari
 ![Name Tag Core Workflow & Closed-Loop Architecture](./assets/workflow-architecture.png)
 
 The application forms a clean **two-stage closed loop** on top of live class-agnostic segmentation:
-1. **Stage A — Enroll & Index**: Click any colored segment on the live camera feed to open **Target Tagging**. `CutoutAugmenter` removes the background via the segmentation mask to generate **1 original transparent cutout + 5 augmentations** (`Horizontal Flip`, `Scale Crop`, `Color Jitter`, `+8° Rotate`, `Gaussian Blur`). After entering required **Title** and **Description** and clicking **Save**, transparent areas are flattened onto neutral `#808080` gray right before encoding by **EmbeddingGemma 2** into 6 × 768-d vectors. **LangChain `FaissStore`** writes all 6 vectors as separate index entries whose metadata all point to the same `{ title, description }`, along with `original` / augmentation tags and timestamp.
-2. **Stage B — Auto-Capture & Recognize**: While the camera runs and the database is non-empty, a throttled background loop extracts each segmented object (both a background-removed cutout for query embedding and a raw camera bbox crop keeping its original background for display), queries **LangChain `FaissStore.similaritySearchVectorWithScore`**, and whenever `cosineSimilarity = 1 - L2² / 2 ≥ threshold` (default `0.78`), pops up the draggable **Pocket** window displaying the raw camera crop and matched database `title`.
+1. **Stage A — Enroll & Index**: Click any colored segment on the live camera feed to open **Target Tagging**. `CutoutAugmenter` removes the background via the segmentation mask to generate **1 original transparent cutout + 5 augmentations** (`Horizontal Flip`, `Scale Crop`, `Color Jitter`, `+8° Rotate`, `Gaussian Blur`). After entering required **Title** and **Description** and clicking **Save**, transparent areas are flattened onto neutral `#808080` gray right before encoding by **EmbeddingGemma 2** into 6 × 768-d vectors. **LangChain `IndexedDbLangChainVectorStore`** writes all 6 vectors into the user's browser IndexedDB (`dsh-name-tag-vectors`) as separate index entries whose metadata all point to the same `{ title, description }`, along with `original` / augmentation tags and timestamp.
+2. **Stage B — Auto-Capture & Recognize**: While the camera runs and the database is non-empty, a throttled background loop extracts each segmented object (both a background-removed cutout for query embedding and a raw camera bbox crop keeping its original background for display), queries **LangChain `IndexedDbLangChainVectorStore.similaritySearchVectorWithScore`** in the browser, and whenever `cosineSimilarity = 1 - L2² / 2 ≥ threshold` (default `0.78`), pops up the draggable **Pocket** window displaying the raw camera crop and matched database `title`.
 
 ---
 
@@ -112,11 +112,11 @@ The application forms a clean **two-stage closed loop** on top of live class-agn
 - **Model & Cache Row**:
   - **`Preload Model`**: Checks local caches and preloads both models; shows a **`❗️` alert badge** on the top-right corner when no local `FastSAM-s` cache exists.
   - **`Load .onnx`**: Manually imports a local `.onnx` FastSAM model file.
-  - **`Clear Vector DB`**: Clears **only** the local FAISS vector database (`faiss-index`), preserving cached CV/embedding models and granularity presets.
-  - **`Clear Cache`**: Wipes `FastSAM-s` IndexedDB cache, `EmbeddingGemma 2` Browser Cache (`transformers-cache`), saved granularity presets/preferences (`localStorage` + `preferences.json`), the FAISS vector store (`faiss-index`), and the Pocket.
+  - **`Clear Vector DB`**: Clears **only** the browser-local IndexedDB vector database (`dsh-name-tag-vectors`), preserving cached CV/embedding models and granularity presets.
+  - **`Clear Cache`**: Wipes `FastSAM-s` IndexedDB cache, `EmbeddingGemma 2` Browser Cache (`transformers-cache`), saved granularity presets/preferences (`localStorage`), the browser vector database (`dsh-name-tag-vectors`), and the Pocket.
 - **Dual Model Status Banners**: Real-time lazy-load progress bars and execution backend badges (`WebGPU` / `WASM`) for both **FastSAM-s** and **EmbeddingGemma 2**.
 - **`Capture Match Similarity` Slider**: Session-only slider (`0.00 ~ 1.00`, **default `0.78`, never persisted** across sessions) with a **`Default`** reset button.
-- **`Cache & Data Filesystem Paths` (Collapsible, default closed)**: Expands to display Host cache directory, `FastSAM-s.onnx` path, `preferences.json` path, `faiss-index` directory + target/vector counts, and Browser storage keys.
+- **`Client-Side Local Storage & Caches` (Collapsible, default closed)**: Expands to display the browser vector DB (`IndexedDB dsh-name-tag-vectors` + target/vector counts), `localStorage` preferences key, browser model caches, and the optional read-only Host model mirror path.
 
 #### D. Right Pane — Card 2: `"Granularity" Real-Time Control Panel` (`GranularityCard`)
 - **Header Actions**: **`Prob. Tags`** switch (session-only, default `OFF`, toggles `#idx · score` pills on camera overlay), **`Save`** button (saves current parameters as a preset), and **Collapse Chevron** (persisted).
@@ -186,7 +186,7 @@ pnpm dsh web
 | **CV 推理框架** | **`onnxruntime-web`**（WebGPU 优先 + WASM SIMD 兜底） | 在浏览器客户端直接运行 FastSAM-s，零服务端 GPU 开销；插件 Node 宿主机本地托管 `/api/name-tag/ort/*` 运行时资产，并通过三级本地优先懒加载（浏览器 IndexedDB → 宿主机磁盘缓存 → HuggingFace）加速加载。 |
 | **嵌入模型** | **EmbeddingGemma 2**（`onnx-community/embeddinggemma-2-ONNX`，`q4` 量化） | Google DeepMind 开源原生多模态嵌入模型（统一 768 维 L2 归一化空间）。初始化时显式置空音频编码器（`audio_config = null`），仅加载视觉（170M）+ 文本（270M）编码器，把裁剪后的物体图片压缩为高区分度向量索引。 |
 | **嵌入推理框架** | **`@huggingface/transformers`（Transformers.js v4）** | 在浏览器端直接运行 EmbeddingGemma 2，权重缓存在浏览器 CacheStorage（`transformers-cache`），并在开启摄像头时与 FastSAM-s 同步触发懒加载。 |
-| **LLM 框架与向量库** | **LangChain JS**（`@langchain/core`、`@langchain/community`）+ **FAISS（`FaissStore`）** | 所有嵌入抽象（`Embeddings`）、文档实体（`Document`）、向量写入（`addVectors`）、持久化（`save` / `load`）与相似度检索（`similaritySearchVectorWithScore`）**全部严格通过 LangChain JS 接口完成**，不直接操作底层数据库。`FaissStore` 内嵌运行于 Node 宿主机内（无需 Docker 或外部数据库服务），持久化到 `~/.dsh/cache/name-tag/faiss-index`。 |
+| **LLM 框架与向量库** | **LangChain JS**（`@langchain/core`）+ **浏览器 IndexedDB（`IndexedDbLangChainVectorStore`）** | 所有嵌入抽象（`Embeddings`）、文档实体（`Document`）、向量写入（`addVectors`）与余弦相似度检索（`similaritySearchVectorWithScore`）**100% 在各自用户浏览器本地运行**，通过继承 LangChain `VectorStore` 并持久化到浏览器 **IndexedDB**（`dsh-name-tag-vectors`）实现。云端多用户访问天然绝对隔离，服务端不存任何业务向量与偏好。 |
 
 ---
 
@@ -196,8 +196,8 @@ pnpm dsh web
 ![Name Tag 核心逻辑与双阶段闭环流程图](./assets/workflow-architecture.png)
 
 整个系统围绕实时的无类别物体分割构建了两段闭环：
-1. **阶段 A（物体标记与增强入库）**：在实时摄像头画面上点击任意分割块，弹出 **「目标标记」** 对话框。系统按分割掩码去除背景生成 **1 张透明原图 + 5 张经典增强图**（水平翻转、尺度缩放、色彩抖动、`+8°` 旋转、高斯模糊）。填写必填的 **「标题」** 与 **「介绍」** 并点击 **「保存」** 后，透明底会瞬时铺平为 `#808080` 中性灰送入 **EmbeddingGemma 2** 压成 6 条 768 维向量，再由 **LangChain `FaissStore`** 作为 6 条独立索引存入本地数据库——它们共同指向同一份 `{ title, description }` 元数据，同时记录各自是 `original` 还是具体某种 `augmentation` 及存入时间戳。
-2. **阶段 B（自动连续捕捉与口袋识别）**：当摄像头开启且数据库非空时，后台按节流周期自动截取当前保留的每个分割物体（对应 bbox）：内部以去背景抠图生成查询向量送往 **LangChain `FaissStore.similaritySearchVectorWithScore`** 检索最接近的索引；一旦余弦相似度（`1 - L2² / 2`）达到或超过设定阈值（默认 `0.78`，每次会话可调），即刻弹出可拖动的 **「口袋」** 窄条浮动窗，按 `targetId` 去重展示该物体的原始摄像头截图（保留背景）及匹配到的数据库 `title`。
+1. **阶段 A（物体标记与增强入库）**：在实时摄像头画面上点击任意分割块，弹出 **「目标标记」** 对话框。系统按分割掩码去除背景生成 **1 张透明原图 + 5 张经典增强图**（水平翻转、尺度缩放、色彩抖动、`+8°` 旋转、高斯模糊）。填写必填的 **「标题」** 与 **「介绍」** 并点击 **「保存」** 后，透明底会瞬时铺平为 `#808080` 中性灰送入 **EmbeddingGemma 2** 压成 6 条 768 维向量，再由 **LangChain `IndexedDbLangChainVectorStore`** 作为 6 条独立索引存入当前用户浏览器的 **IndexedDB（`dsh-name-tag-vectors`）**——它们共同指向同一份 `{ title, description }` 元数据，同时记录各自是 `original` 还是具体某种 `augmentation` 及存入时间戳。
+2. **阶段 B（自动连续捕捉与口袋识别）**：当摄像头开启且数据库非空时，后台按节流周期自动截取当前保留的每个分割物体（对应 bbox）：内部以去背景抠图生成查询向量直接在浏览器内通过 **LangChain `IndexedDbLangChainVectorStore.similaritySearchVectorWithScore`** 检索最接近的索引；一旦余弦相似度（`1 - L2² / 2`）达到或超过设定阈值（默认 `0.78`，每次会话可调），即刻弹出可拖动的 **「口袋」** 窄条浮动窗，按 `targetId` 去重展示该物体的原始摄像头截图（保留背景）及匹配到的数据库 `title`。
 
 ---
 
@@ -223,11 +223,11 @@ pnpm dsh web
 - **模型与缓存控制行**：
   - **「预加载模型」**：检查本地缓存并预加载双模型；当本地未发现 `FastSAM-s` 模型时，按钮右上角显示 **`❗️` 提醒角标**。
   - **「导入 .onnx」**：支持手动选择本地 `.onnx` 模型文件加载。
-  - **「清空向量库」**：**仅清空**本地 FAISS 向量数据库（`faiss-index`），保留已缓存的模型权重与颗粒度预设。
-  - **「清缓存」**：一键清空 `FastSAM-s` IndexedDB 缓存、`EmbeddingGemma 2` 浏览器缓存（`transformers-cache`）、颗粒度参数与已保存预设（`localStorage` + `preferences.json`）、FAISS 向量库目录（`faiss-index`）以及口袋内容。
+  - **「清空向量库」**：**仅清空**当前浏览器的 IndexedDB 向量数据库（`dsh-name-tag-vectors`），保留已缓存的模型权重与颗粒度预设。
+  - **「清缓存」**：一键清空 `FastSAM-s` IndexedDB 缓存、`EmbeddingGemma 2` 浏览器缓存（`transformers-cache`）、颗粒度参数与已保存预设（`localStorage`）、浏览器向量库（`dsh-name-tag-vectors`）以及口袋内容。
 - **双模型状态与进度条**：分别展示 `FastSAM-s` 与 `EmbeddingGemma 2` 的加载状态及执行后端（`WebGPU` / `WASM`）。
 - **「捕捉匹配相似度阈值」滑块**：会话级临时参数（范围 `0.00 ~ 1.00`，**每次打开默认 `0.78` 且不做持久化缓存**），右侧配有 **「默认」** 快捷重置按钮。
-- **「缓存与数据文件系统路径」折叠子块（默认关闭）**：点击可展开查看宿主机缓存目录、模型文件路径、偏好配置文件路径、FAISS 向量库目录与目标/向量数统计、浏览器缓存键名。
+- **「客户端本地存储与缓存位置」折叠子块（默认关闭）**：点击可展开查看浏览器向量库（`IndexedDB dsh-name-tag-vectors` 及目标/向量数统计）、`localStorage` 偏好键名、浏览器模型缓存，以及宿主机只读公共模型镜像路径（无任何用户数据）。
 
 #### D. 右侧功能区 — 第二张卡：「“颗粒度”实时调控面板」（`GranularityCard`）
 - **卡片右上角操作区**（从左到右）：

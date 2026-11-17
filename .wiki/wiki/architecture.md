@@ -24,9 +24,9 @@ All runtime logic is encapsulated in single-responsibility classes under `src/cl
 - `FastSamInferenceEngine` (`src/client/core/FastSamInferenceEngine.ts`): `onnxruntime-web` WebGPU/WASM session, RGB letterbox preprocessor, and YOLOv8-seg tensor decoder.
 - `CameraController` (`src/client/core/CameraController.ts`): `navigator.mediaDevices.getUserMedia` lifecycle, device enumeration, and stream switching.
 - `SavedPresetModels` (`src/client/core/SavedPresetModels.ts`): OOP domain classes `SavedPresetItem` (`id`, `text`, `selected`, `settings`) and `GranularitySettings`.
-- `PreferencesStore` (`src/client/core/PreferencesStore.ts`): Dual-tier persistence (`localStorage` + Host `/api/name-tag/preferences`) for Granularity panel state, card collapse, and `SavedPresetItem` list.
+- `PreferencesStore` (`src/client/core/PreferencesStore.ts`): 100% browser-local persistence (`localStorage`) for Granularity panel state, card collapse, and `SavedPresetItem` list.
 - `Gemma2EmbeddingEngine` & `Gemma2LangChainEmbeddings` (`src/client/core/Gemma2EmbeddingEngine.ts`): Client-side EmbeddingGemma 2 (`onnx-community/embeddinggemma-2-ONNX`) encoder & LangChain `Embeddings` subclass.
-- `TargetVectorRepository` (`src/vector-store.ts`): Node Host LangChain `FaissStore` repository persisting 6-vector target indices + metadata to `~/.dsh/cache/name-tag/faiss-index` and listing stored entries.
+- `IndexedDbLangChainVectorStore` & `BrowserTargetVectorRepository` (`src/client/core/BrowserVectorStore.ts`): 100% browser-local LangChain `VectorStore` persisted in Browser IndexedDB (`dsh-name-tag-vectors`), storing 6-vector target indices + metadata with zero server state.
 - `VectorTableFormatter` (`src/client/core/VectorTableFormatter.ts`) & `VectorDbModal` (`src/client/components/VectorDbModal.tsx`): 5-column database inspector (`index`, `augmentation`, `title`, `description`, `timestamp`) with 5-head/5-tail vector formatting and resizable `title`/`description` columns.
 - `PocketCaptureManager` (`src/client/core/PocketCaptureManager.ts`) & `PocketFloatingWindow` (`src/client/components/PocketFloatingWindow.tsx`): Deduplicated match accumulator (`targetId`) and draggable narrow vertical Pocket window.
 

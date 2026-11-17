@@ -2,6 +2,5 @@ packages:
   - .
 
 allowBuilds:
-  faiss-node: true
-  onnxruntime-node: true
+  onnxruntime-node: false
   protobufjs: false

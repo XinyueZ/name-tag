@@ -5,6 +5,7 @@ import { defineConfig } from 'tsdown'
 const id = '@deepseek-ai/dsh-client-name-tag'
 const rootDir = dirname(fileURLToPath(import.meta.url))
 const tfWebEntry = resolve(rootDir, 'node_modules/@huggingface/transformers/dist/transformers.web.js')
+const langSmithStub = resolve(rootDir, 'src/client/core/LangSmithBrowserStub.ts')
 
 export default defineConfig([
   // Node half: lib/index.js & lib/invariant.js
@@ -21,7 +22,7 @@ export default defineConfig([
     dts: false,
     clean: false,
     deps: {
-      neverBundle: ['@deepseek-ai/cordis', '@langchain/core', '@langchain/community', 'faiss-node'],
+      neverBundle: ['@deepseek-ai/cordis'],
     },
   },
   // Browser client half: lib/client.js (ModuleLoader closure)
@@ -37,6 +38,10 @@ export default defineConfig([
     clean: false,
     alias: {
       '@huggingface/transformers': tfWebEntry,
+      'langsmith': langSmithStub,
+      'langsmith/run_trees': langSmithStub,
+      'langsmith/singletons/traceable': langSmithStub,
+      'langsmith/traceable': langSmithStub,
     },
     define: {
       'process.env.NODE_ENV': '"production"',

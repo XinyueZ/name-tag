@@ -11,6 +11,7 @@ export { GranularitySettings, SavedPresetItem } from './core/SavedPresetModels'
 export { Gemma2EmbeddingEngine, Gemma2LangChainEmbeddings } from './core/Gemma2EmbeddingEngine'
 export { VectorTableFormatter } from './core/VectorTableFormatter'
 export { PocketCaptureManager } from './core/PocketCaptureManager'
+export { BrowserTargetVectorRepository, IndexedDbLangChainVectorStore } from './core/BrowserVectorStore'
 
 export const name = '@deepseek-ai/dsh-client-name-tag/client'
 export const inject = ['slots', 'locale']

@@ -43,7 +43,11 @@ Non-class top-level declarations are allowed **only** at framework integration b
 
 ---
 
-## 4. Caching, Storage & Framework Abstraction Rules
+## 4. 100% Client-Side AI, Caching, Storage & Framework Abstraction Rules
+
+- **100% Client-Side AI & User Data Isolation (Mandatory Invariant)**:
+  - All AI model inference, computer vision processing, user preferences/presets, and LangChain vector database storage/retrieval MUST execute and persist strictly inside each user's browser (`WebGPU`/`WASM`, `IndexedDB`, `CacheStorage`, `localStorage`).
+  - Never add server-side endpoints that persist user vectors, labels, or preferences on the DSH Node host; the Node host must remain strictly limited to stateless, read-only public static asset serving (`/api/name-tag/ort/*`, `/api/name-tag/model`).
 
 - **Lazy-Load First**: Models and heavy assets MUST check local caches first (IndexedDB / CacheStorage / Host disk cache). Never trigger network downloads on startup or when a valid local copy already exists.
 - **Cache Symmetry & Visibility**:

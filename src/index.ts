@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream, existsSync } from 'node:fs'
-import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, rename, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -9,18 +9,11 @@ import {
   API_MODEL_PATH,
   API_MODEL_STATUS_PATH,
   API_ORT_PREFIX,
-  API_PREFERENCES_PATH,
-  API_VECTORS_PATH,
-  API_VECTOR_SEARCH_PATH,
-  EMBEDDING_DIM,
   FASTSAM_MODEL_FILENAME,
   FASTSAM_REMOTE_URL,
   ORT_ASSET_FILES,
   type ModelStatusResponse,
-  type SaveTaggedTargetRequest,
-  type VectorSearchRequest,
 } from './invariant'
-import { TargetVectorRepository } from './vector-store'
 
 export const name = '@deepseek-ai/dsh-client-name-tag'
 
@@ -43,14 +36,16 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/**
+ * NameTagHostServer: Stateless read-only static mirror for ONNX Runtime Web WASM assets
+ * and public FastSAM-s weights. Holds zero user data, zero preferences, and zero vectors.
+ */
 export class NameTagHostServer {
   private readonly pluginRoot: string
-  private readonly vectorRepo: TargetVectorRepository
   private inFlightDownload: Promise<string> | null = null
 
   public constructor(pluginRoot?: string) {
     this.pluginRoot = pluginRoot ?? NameTagHostServer.resolvePluginRoot()
-    this.vectorRepo = new TargetVectorRepository(NameTagHostServer.resolveFaissIndexDir(), EMBEDDING_DIM)
   }
 
   public static resolvePluginRoot(): string {
@@ -65,14 +60,6 @@ export class NameTagHostServer {
 
   public static resolveCacheFilePath(): string {
     return join(NameTagHostServer.resolveCacheDir(), FASTSAM_MODEL_FILENAME)
-  }
-
-  public static resolvePreferencesFilePath(): string {
-    return join(NameTagHostServer.resolveCacheDir(), 'preferences.json')
-  }
-
-  public static resolveFaissIndexDir(): string {
-    return join(NameTagHostServer.resolveCacheDir(), 'faiss-index')
   }
 
   public static resolveBundledModelPath(pluginRoot: string): string {
@@ -123,21 +110,12 @@ export class NameTagHostServer {
 
   public async getModelStatus(): Promise<ModelStatusResponse> {
     const existing = await this.findExistingLocalModel()
-    const cacheDir = NameTagHostServer.resolveCacheDir()
     const cachePath = NameTagHostServer.resolveCacheFilePath()
-    const preferencesPath = NameTagHostServer.resolvePreferencesFilePath()
-    const faissIndexDir = NameTagHostServer.resolveFaissIndexDir()
-    const vecStats = await this.vectorRepo.getStats().catch(() => ({ totalVectors: 0, totalTargets: 0, indexDir: faissIndexDir }))
     return {
       exists: existing !== null,
       filename: FASTSAM_MODEL_FILENAME,
       sizeBytes: existing?.sizeBytes ?? 0,
-      cacheDir,
       cachePath: existing?.path ?? cachePath,
-      preferencesPath,
-      faissIndexDir,
-      totalVectors: vecStats.totalVectors,
-      totalTargets: vecStats.totalTargets,
       remoteUrl: FASTSAM_REMOTE_URL,
     }
   }
@@ -265,121 +243,6 @@ export class NameTagHostServer {
           }
         },
       }), 'name-tag: /api model lazy-load route')
-
-      connCtx.effect(() => connection.fetch.register({
-        path: API_PREFERENCES_PATH,
-        methods: ['GET', 'PUT', 'DELETE'],
-        requestBody: 'buffered',
-        fetch: async (request: Request): Promise<Response> => {
-          const prefPath = NameTagHostServer.resolvePreferencesFilePath()
-          if (request.method === 'GET') {
-            try {
-              const text = await readFile(prefPath, 'utf8')
-              return Response.json(JSON.parse(text), { headers: { 'cache-control': 'no-store' } })
-            } catch (error: unknown) {
-              if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
-                return Response.json(null, { headers: { 'cache-control': 'no-store' } })
-              }
-              return Response.json(
-                { error: error instanceof Error ? error.message : String(error) },
-                { status: 500, headers: { 'cache-control': 'no-store' } },
-              )
-            }
-          }
-          if (request.method === 'DELETE') {
-            try {
-              await unlink(prefPath)
-            } catch (error: unknown) {
-              if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') {
-                return Response.json(
-                  { error: error instanceof Error ? error.message : String(error) },
-                  { status: 500, headers: { 'cache-control': 'no-store' } },
-                )
-              }
-            }
-            return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } })
-          }
-          try {
-            const payload = await request.json()
-            if (payload === null || typeof payload !== 'object') {
-              return Response.json({ error: 'Invalid preferences payload' }, { status: 400 })
-            }
-            await mkdir(dirname(prefPath), { recursive: true })
-            const tmpPref = prefPath + '.tmp-' + process.pid + '-' + Date.now()
-            await writeFile(tmpPref, JSON.stringify(payload, null, 2) + '\n', 'utf8')
-            await rename(tmpPref, prefPath)
-            return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } })
-          } catch (error: unknown) {
-            return Response.json(
-              { error: error instanceof Error ? error.message : String(error) },
-              { status: 500, headers: { 'cache-control': 'no-store' } },
-            )
-          }
-        },
-      }), 'name-tag: /api preferences route')
-
-      connCtx.effect(() => connection.fetch.register({
-        path: API_VECTORS_PATH,
-        methods: ['GET', 'POST', 'DELETE'],
-        requestBody: 'buffered',
-        fetch: async (request: Request): Promise<Response> => {
-          if (request.method === 'GET') {
-            try {
-              const includeEntries = new URL(request.url).searchParams.get('include') === 'entries'
-              const stats = includeEntries
-                ? await this.vectorRepo.listAllEntries()
-                : await this.vectorRepo.getStats()
-              return Response.json(stats, { headers: { 'cache-control': 'no-store' } })
-            } catch (error: unknown) {
-              return Response.json(
-                { error: error instanceof Error ? error.message : String(error) },
-                { status: 500, headers: { 'cache-control': 'no-store' } },
-              )
-            }
-          }
-          if (request.method === 'DELETE') {
-            try {
-              await this.vectorRepo.clearAll()
-              return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } })
-            } catch (error: unknown) {
-              return Response.json(
-                { error: error instanceof Error ? error.message : String(error) },
-                { status: 500, headers: { 'cache-control': 'no-store' } },
-              )
-            }
-          }
-          try {
-            const body = (await request.json()) as SaveTaggedTargetRequest
-            const saved = await this.vectorRepo.saveTarget(body)
-            return Response.json(saved, { status: 200, headers: { 'cache-control': 'no-store' } })
-          } catch (error: unknown) {
-            const msg = error instanceof Error ? error.message : String(error)
-            const status = msg.includes('required') || msg.includes('Invalid') ? 400 : 500
-            return Response.json({ error: msg }, { status, headers: { 'cache-control': 'no-store' } })
-          }
-        },
-      }), 'name-tag: /api vectors route')
-
-      connCtx.effect(() => connection.fetch.register({
-        path: API_VECTOR_SEARCH_PATH,
-        methods: ['POST'],
-        requestBody: 'buffered',
-        fetch: async (request: Request): Promise<Response> => {
-          try {
-            const body = (await request.json()) as VectorSearchRequest
-            if (!Array.isArray(body?.vectors)) {
-              return Response.json({ error: 'Invalid search vectors payload' }, { status: 400 })
-            }
-            const result = await this.vectorRepo.searchMatches(body)
-            return Response.json(result, { status: 200, headers: { 'cache-control': 'no-store' } })
-          } catch (error: unknown) {
-            return Response.json(
-              { error: error instanceof Error ? error.message : String(error) },
-              { status: 500, headers: { 'cache-control': 'no-store' } },
-            )
-          }
-        },
-      }), 'name-tag: /api vector search route')
 
       const ortDistDir = NameTagHostServer.resolveOrtDistDir()
       if (ortDistDir !== null) {

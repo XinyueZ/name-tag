@@ -8,17 +8,14 @@ export const LOCALE_NS = 'name.tag'
 
 export const API_MODEL_PATH = '/api/name-tag/model'
 export const API_MODEL_STATUS_PATH = '/api/name-tag/model/status'
-export const API_PREFERENCES_PATH = '/api/name-tag/preferences'
-export const API_VECTORS_PATH = '/api/name-tag/vectors'
-export const API_VECTOR_SEARCH_PATH = '/api/name-tag/vectors/search'
-export const DEFAULT_MATCH_THRESHOLD = 0.78
-export const EMBEDDING_MODEL_ID = 'onnx-community/embeddinggemma-2-ONNX'
-export const EMBEDDING_DIM = 768
 export const API_ORT_PREFIX = '/api/name-tag/ort/'
 
 export const FASTSAM_MODEL_FILENAME = 'FastSAM-s.onnx'
 export const FASTSAM_REMOTE_URL =
   'https://huggingface.co/SpatialHub/fastsam-onnx/resolve/main/FastSAM-s.onnx'
+export const EMBEDDING_MODEL_ID = 'onnx-community/embeddinggemma-2-ONNX'
+export const EMBEDDING_DIM = 768
+export const DEFAULT_MATCH_THRESHOLD = 0.78
 
 export const ORT_ASSET_FILES = [
   'ort-wasm-simd-threaded.wasm',
@@ -40,6 +37,20 @@ export interface GranularityParams {
   readonly minAreaPercent: number
   readonly confThreshold: number
   readonly showSuppressed: boolean
+}
+
+export interface SavedGranularityPreset {
+  readonly id: string
+  readonly text: string
+  readonly selected: boolean
+  readonly settings: GranularityParams
+  readonly savedAt: number
+}
+
+export interface NameTagPreferences {
+  readonly granularity: GranularityParams
+  readonly granularityCardCollapsed?: boolean
+  readonly savedPresets?: readonly SavedGranularityPreset[]
 }
 
 export interface BoundingBox {
@@ -65,20 +76,6 @@ export interface GranularityFilterResult {
   readonly durationMs: number
 }
 
-export interface SavedGranularityPreset {
-  readonly id: string
-  readonly text: string
-  readonly selected: boolean
-  readonly settings: GranularityParams
-  readonly savedAt: number
-}
-
-export interface NameTagPreferences {
-  readonly granularity: GranularityParams
-  readonly granularityCardCollapsed?: boolean
-  readonly savedPresets?: readonly SavedGranularityPreset[]
-}
-
 export type VectorImageKind = 'original' | 'flip' | 'scale' | 'color' | 'rotate' | 'blur'
 
 export interface TagVectorMetadata {
@@ -88,22 +85,9 @@ export interface TagVectorMetadata {
   readonly imageKind: VectorImageKind
   readonly isOriginal: boolean
   readonly augmentation: Exclude<VectorImageKind, 'original'> | null
-  readonly vectorHead?: readonly number[]
-  readonly vectorTail?: readonly number[]
-  readonly vectorDim?: number
-  readonly createdAt: number
-}
-
-export interface VectorTableRow {
-  readonly id: string
-  readonly targetId?: string
   readonly vectorHead: readonly number[]
   readonly vectorTail: readonly number[]
   readonly vectorDim: number
-  readonly imageKind: VectorImageKind
-  readonly augmentation: string
-  readonly title: string
-  readonly description: string
   readonly createdAt: number
 }
 
@@ -124,12 +108,19 @@ export interface SaveTaggedTargetResponse {
   readonly insertedCount: number
   readonly totalVectors: number
   readonly totalTargets: number
-  readonly indexDir: string
 }
 
-export interface VectorSearchRequest {
-  readonly vectors: readonly (readonly number[])[]
-  readonly threshold: number
+export interface VectorTableRow {
+  readonly id: string
+  readonly targetId?: string
+  readonly vectorHead: readonly number[]
+  readonly vectorTail: readonly number[]
+  readonly vectorDim: number
+  readonly imageKind: VectorImageKind
+  readonly augmentation: string
+  readonly title: string
+  readonly description: string
+  readonly createdAt: number
 }
 
 export interface VectorSearchMatchResult {
@@ -158,7 +149,6 @@ export interface VectorSearchResponse {
 export interface VectorStoreStatsResponse {
   readonly totalVectors: number
   readonly totalTargets: number
-  readonly indexDir: string
   readonly entries?: readonly VectorTableRow[]
 }
 
@@ -166,15 +156,10 @@ export interface ModelStatusResponse {
   readonly exists: boolean
   readonly filename: string
   readonly sizeBytes: number
-  readonly cacheDir: string
   readonly cachePath: string
-  readonly preferencesPath: string
-  readonly faissIndexDir: string
-  readonly totalVectors: number
-  readonly totalTargets: number
   readonly remoteUrl: string
 }
 
 export function apply(_ctx: Context): void {
-  // Shared constants & types between Node host and Browser client halves.
+  // Shared constants & types between Node host static mirror and Browser client.
 }

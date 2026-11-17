@@ -4,8 +4,8 @@ import { CameraController, type CameraDeviceOption } from '../core/CameraControl
 import { CutoutAugmenter, type CutoutPreviewItem } from '../core/CutoutAugmenter'
 import { FastSamInferenceEngine, type ExecutionProviderKind } from '../core/FastSamInferenceEngine'
 import { Gemma2EmbeddingEngine, Gemma2LangChainEmbeddings } from '../core/Gemma2EmbeddingEngine'
+import { BrowserTargetVectorRepository } from '../core/BrowserVectorStore'
 import { PocketCaptureManager, type PocketItem } from '../core/PocketCaptureManager'
-import { TargetVectorClient } from '../core/TargetVectorClient'
 import { GranularityFilter } from '../core/GranularityFilter'
 import { LocaleService, type TranslateFn } from '../core/LocaleService'
 import { ModelCacheStore, type ModelLoadSource } from '../core/ModelCacheStore'
@@ -39,7 +39,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const embedEngineRef = useRef<Gemma2EmbeddingEngine | null>(null)
   const embedLangChainRef = useRef<Gemma2LangChainEmbeddings | null>(null)
   const embedLoadPromiseRef = useRef<Promise<boolean> | null>(null)
-  const vectorClientRef = useRef<TargetVectorClient | null>(null)
+  const vectorRepoRef = useRef<BrowserTargetVectorRepository | null>(null)
   const modelLoadPromiseRef = useRef<Promise<boolean> | null>(null)
 
   if (cameraRef.current === null) cameraRef.current = new CameraController()
@@ -50,7 +50,9 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     embedEngineRef.current = new Gemma2EmbeddingEngine()
     embedLangChainRef.current = new Gemma2LangChainEmbeddings(embedEngineRef.current)
   }
-  if (vectorClientRef.current === null) vectorClientRef.current = new TargetVectorClient()
+  if (vectorRepoRef.current === null && embedLangChainRef.current !== null) {
+    vectorRepoRef.current = new BrowserTargetVectorRepository(embedLangChainRef.current)
+  }
 
   const [isDark, setIsDark] = useState<boolean>(() => ThemeService.isDarkTheme())
   const [, setLangTick] = useState<number>(0)
@@ -124,21 +126,13 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
       setHasLocalModel(res.hasLocalModel)
       if (res.hostStatus !== null) {
         setHostStorageStatus(res.hostStatus)
-        setVectorStats({
-          totalTargets: res.hostStatus.totalTargets,
-          totalVectors: res.hostStatus.totalVectors,
-        })
       }
     })
-    if (prefStoreRef.current?.loadLocal() === null) {
-      void prefStoreRef.current.loadFromHost().then((hostPrefs) => {
-        if (active && hostPrefs !== null) {
-          setGranularity(hostPrefs.granularity)
-          setGranularityCollapsed(Boolean(hostPrefs.granularityCardCollapsed))
-          setSavedPresets(hostPrefs.savedPresets ?? [])
-        }
-      })
-    }
+    void vectorRepoRef.current?.getStats().then((stats) => {
+      if (active) {
+        setVectorStats({ totalTargets: stats.totalTargets, totalVectors: stats.totalVectors })
+      }
+    })
     return () => { active = false }
   }, [])
 
@@ -241,8 +235,10 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     await engineRef.current?.dispose()
     await Gemma2EmbeddingEngine.clearBrowserCache()
     await embedEngineRef.current?.dispose()
-    await prefStoreRef.current?.clearAll()
-    await vectorClientRef.current?.clearAll()
+    prefStoreRef.current?.clearLocal()
+    await vectorRepoRef.current?.clearAll()
+    setDbRows([])
+    setMatchError(null)
     setModelPhase('idle')
     setEmbedPhase('idle')
     setEmbedPct(0)
@@ -263,10 +259,6 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
       setHasLocalModel(avail.hasLocalModel)
       if (avail.hostStatus !== null) {
         setHostStorageStatus(avail.hostStatus)
-        setVectorStats({
-          totalTargets: avail.hostStatus.totalTargets,
-          totalVectors: avail.hostStatus.totalVectors,
-        })
       }
     }
   }, [])
@@ -374,13 +366,11 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     const camera = cameraRef.current
     const video = videoRef.current
     const engine = engineRef.current
-    const prefStore = prefStoreRef.current
     const embedEngine = embedEngineRef.current
     return () => {
       camera?.stop(video)
       void engine?.dispose()
       void embedEngine?.dispose()
-      prefStore?.dispose()
     }
   }, [])
 
@@ -417,10 +407,10 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
       if (cancelled) return
       const video = videoRef.current
       const langChainEmbeddings = embedLangChainRef.current
-      const vectorClient = vectorClientRef.current
+      const vectorRepo = vectorRepoRef.current
       const kept = keptRef.current
 
-      if (video && langChainEmbeddings && vectorClient && video.readyState >= 2 && video.videoWidth > 0 && kept.length > 0) {
+      if (video && langChainEmbeddings && vectorRepo && video.readyState >= 2 && video.videoWidth > 0 && kept.length > 0) {
         try {
           const frameCanvas = CutoutAugmenter.captureVideoFrame(video)
           const candidates = kept.slice(0, 8)
@@ -434,36 +424,19 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
           }
           const vectors = await langChainEmbeddings.embedImages(queryCutoutUrls)
           if (!cancelled && vectors.length > 0) {
-            const searchRes = await vectorClient.searchMatches(vectors, matchThresholdRef.current)
+            const searchRes = await vectorRepo.searchMatches(vectors, matchThresholdRef.current)
             if (!cancelled) {
               setMatchError(null)
               const rawHits = searchRes.results.filter(
                 (hit) => hit.matched && hit.targetId !== null && Boolean(rawPocketUrls[hit.index]),
               )
-              let fallbackRows: readonly VectorTableRow[] | null = null
-              if (rawHits.some((hit) => !hit.title || hit.title.trim().length === 0)) {
-                try {
-                  const listed = await vectorClient.listEntries()
-                  fallbackRows = listed.entries ?? []
-                } catch {
-                  fallbackRows = []
-                }
-              }
               const matchedItems: PocketItem[] = []
               const liveRecognized: RecognizedDetection[] = []
               const nowTs = Date.now()
               for (let i = 0; i < rawHits.length; i += 1) {
                 const hit = rawHits[i]
                 const tid = hit.targetId as string
-                let resolvedTitle = typeof hit.title === 'string' ? hit.title.trim() : ''
-                if (resolvedTitle.length === 0 && fallbackRows !== null) {
-                  const foundRow = fallbackRows.find(
-                    (r) => r.targetId === tid || r.id.startsWith(tid + ':'),
-                  )
-                  if (foundRow && foundRow.title.trim().length > 0) {
-                    resolvedTitle = foundRow.title.trim()
-                  }
-                }
+                const resolvedTitle = typeof hit.title === 'string' ? hit.title.trim() : ''
                 if (resolvedTitle.length === 0) continue
                 const cand = candidates[hit.index]
                 matchedItems.push({
@@ -548,12 +521,12 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   }, [embedEp, embedError, embedPct, embedPhase, locale])
 
   const loadDatabaseEntries = useCallback(async (): Promise<void> => {
-    const vectorClient = vectorClientRef.current
-    if (!vectorClient) return
+    const vectorRepo = vectorRepoRef.current
+    if (!vectorRepo) return
     setDbLoading(true)
     setDbError(null)
     try {
-      const res = await vectorClient.listEntries()
+      const res = await vectorRepo.listEntries()
       setDbRows(res.entries ?? [])
       setVectorStats({
         totalTargets: res.totalTargets,
@@ -567,7 +540,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   }, [])
 
   const handleClearVectorDb = useCallback(async (): Promise<void> => {
-    await vectorClientRef.current?.clearAll()
+    await vectorRepoRef.current?.clearAll()
     setVectorStats({ totalTargets: 0, totalVectors: 0 })
     setDbRows([])
     setMatchError(null)
@@ -583,12 +556,12 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     if (!tagModalItems || tagModalItems.length === 0) return
     const ok = await ensureEmbeddingReady()
     const langChainEmbeddings = embedLangChainRef.current
-    const vectorClient = vectorClientRef.current
-    if (!ok || !langChainEmbeddings || !vectorClient) {
+    const vectorRepo = vectorRepoRef.current
+    if (!ok || !langChainEmbeddings || !vectorRepo) {
       throw new Error(embedError || 'EmbeddingGemma 2 failed to initialize')
     }
     const vectors = await langChainEmbeddings.embedImages(tagModalItems.map((item) => item.dataUrl))
-    const saved = await vectorClient.saveTaggedTarget({
+    const saved = await vectorRepo.saveTaggedTarget({
       title,
       description,
       items: tagModalItems.map((item, idx) => ({

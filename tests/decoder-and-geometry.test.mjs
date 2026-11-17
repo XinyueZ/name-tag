@@ -270,6 +270,51 @@ test('PocketCaptureManager deduplicates by targetId and clamps floating window p
   assert.equal(tracked[0].x1, 105)
 })
 
+test('BrowserTargetVectorRepository stores 6 vectors via LangChain VectorStore, searches by cosine similarity, and clears cleanly', async () => {
+  const clientExports = await loadBuiltClientBundle()
+  const { BrowserTargetVectorRepository, IndexedDbLangChainVectorStore, Gemma2EmbeddingEngine, Gemma2LangChainEmbeddings } = clientExports
+  const embeddings = new Gemma2LangChainEmbeddings(new Gemma2EmbeddingEngine())
+  const repo = new BrowserTargetVectorRepository(embeddings)
+  assert.ok(repo.getVectorStore() instanceof IndexedDbLangChainVectorStore)
+
+  await assert.rejects(
+    () => repo.saveTaggedTarget({ title: '  ', description: 'desc', items: [] }),
+    /Title and description are both required/,
+  )
+
+  const kinds = ['original', 'flip', 'scale', 'color', 'rotate', 'blur']
+  const items = kinds.map((kind, idx) => {
+    const vec = new Array(768).fill(0)
+    vec[idx] = 1
+    return { imageKind: kind, vector: vec }
+  })
+  const saved = await repo.saveTaggedTarget({ title: 'Ceramic Mug', description: 'White coffee mug', items })
+  assert.equal(saved.insertedCount, 6)
+  assert.equal(saved.totalTargets, 1)
+  assert.equal(saved.totalVectors, 6)
+
+  const qMatch = new Array(768).fill(0)
+  qMatch[0] = 1
+  const qMiss = new Array(768).fill(0)
+  qMiss[200] = 1
+  const search = await repo.searchMatches([qMatch, qMiss], 0.78)
+  assert.equal(search.results[0].matched, true)
+  assert.equal(search.results[0].title, 'Ceramic Mug')
+  assert.equal(search.results[0].similarity, 1)
+  assert.equal(search.results[1].matched, false)
+  assert.equal(search.results[1].title, null)
+
+  const listed = await repo.listEntries()
+  assert.equal(listed.entries.length, 6)
+  assert.equal(listed.entries[0].augmentation, 'original')
+  assert.equal(listed.entries[3].augmentation, 'color')
+
+  await repo.clearAll()
+  const afterClear = await repo.getStats()
+  assert.equal(afterClear.totalTargets, 0)
+  assert.equal(afterClear.totalVectors, 0)
+})
+
 test('SplitPaneGeometry clamps split ratio within [26, 74]', async () => {
   const clientExports = await loadBuiltClientBundle()
   const { SplitPaneGeometry } = clientExports

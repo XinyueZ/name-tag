@@ -218,28 +218,8 @@ export function CameraControlStrip(props: CameraControlStripProps): React.JSX.El
         {pathsExpanded ? (
           <>
         <div className="nt-storage-row">
-          <span className="nt-storage-key">{props.locale.translate('storage.cacheDir')}</span>
-          <span className="nt-storage-val">
-            {props.hostStorageStatus?.cacheDir ?? props.locale.translate('storage.loading')}
-          </span>
-        </div>
-        <div className="nt-storage-row">
-          <span className="nt-storage-key">{props.locale.translate('storage.modelPath')}</span>
-          <span className="nt-storage-val">
-            {props.hostStorageStatus?.cachePath ?? props.locale.translate('storage.loading')}
-          </span>
-        </div>
-        <div className="nt-storage-row">
-          <span className="nt-storage-key">{props.locale.translate('storage.prefsPath')}</span>
-          <span className="nt-storage-val">
-            {props.hostStorageStatus?.preferencesPath ?? props.locale.translate('storage.loading')}
-          </span>
-        </div>
-        <div className="nt-storage-row">
-          <span className="nt-storage-key">{props.locale.translate('storage.faissDir')}</span>
-          <span className="nt-storage-val">
-            {props.hostStorageStatus?.faissIndexDir ?? props.locale.translate('storage.loading')}
-          </span>
+          <span className="nt-storage-key">{props.locale.translate('storage.vectorDb')}</span>
+          <span className="nt-storage-val">{props.locale.translate('storage.vectorDbValue')}</span>
           <span className="nt-storage-key">
             {props.locale.translate('storage.faissStats', {
               targets: props.vectorStats.totalTargets,
@@ -248,8 +228,18 @@ export function CameraControlStrip(props: CameraControlStripProps): React.JSX.El
           </span>
         </div>
         <div className="nt-storage-row">
+          <span className="nt-storage-key">{props.locale.translate('storage.prefsBrowser')}</span>
+          <span className="nt-storage-val">{props.locale.translate('storage.prefsBrowserValue')}</span>
+        </div>
+        <div className="nt-storage-row">
           <span className="nt-storage-key">{props.locale.translate('storage.browserCache')}</span>
           <span className="nt-storage-val">{props.locale.translate('storage.browserValue')}</span>
+        </div>
+        <div className="nt-storage-row">
+          <span className="nt-storage-key">{props.locale.translate('storage.modelPath')}</span>
+          <span className="nt-storage-val">
+            {props.hostStorageStatus?.cachePath ?? props.locale.translate('storage.loading')}
+          </span>
         </div>
           </>
         ) : null}

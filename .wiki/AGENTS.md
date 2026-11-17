@@ -44,6 +44,7 @@ Periodically verify:
 
 ## Project Engineering Invariants (Must Always Hold)
 - **Plugin Identity**: Official name `name-tag` (`@deepseek-ai/dsh-client-name-tag`), dedicated permanent DSH Web tab placed last in `conversation.view`.
+- **100% Client-Side AI & Zero Server User State**: All AI model inference (`FastSAM-s`, `EmbeddingGemma 2`), business logic, user preferences/presets (`localStorage`), and the LangChain vector database (`IndexedDbLangChainVectorStore` in IndexedDB) MUST run and persist strictly in the client browser. The DSH Node host MUST remain stateless regarding user data (serving only read-only public static ORT/model assets) to guarantee multi-user isolation.
 - **Strict OOP**: Prefer classes and static class methods over standalone global helper functions (except where DSH Cordis/module entrypoints require exported symbols like `name`, `inject`, `apply`).
 - **Atomic Components**: Keep UI components small, single-responsibility, and decoupled from inference/storage services.
 - **Dedicated Assets**:

@@ -174,3 +174,12 @@ Chronological append-only log of project milestones, ingests, builds, and lint c
 ## [2026-11-17] ingest | Convert screen recording to demo GIF and embed in README header
 - Converted `Screen Recording 2026-11-17 at 19.48.28.mov` (199.6 MB) to an optimized 8.73 MB loopable GIF at `assets/name-tag-demo.gif` (920px wide, 6 fps, 96-color diff palette).
 - Updated `README.md` header order to: Big Title -> English tagline -> Chinese translation -> Demo GIF -> Table of Contents.
+
+## [2026-11-17] milestone | Migrate Vector DB and Preferences 100% to Client Browser
+- Replaced server-side `faiss-node` / `FaissStore` with `IndexedDbLangChainVectorStore` (`@langchain/core/vectorstores` + IndexedDB `dsh-name-tag-vectors`) and `BrowserTargetVectorRepository` in `src/client/core/BrowserVectorStore.ts`.
+- Added `LangSmithBrowserStub.ts` aliases in `tsdown.config.ts` so `@langchain/core/vectorstores` compiles cleanly into `lib/client.js` with zero Node built-ins (`uniqueReqs: ['react', 'react/jsx-runtime']`).
+- Simplified `PreferencesStore` to browser-only `localStorage`, stripped user routes from `NameTagHostServer` (`src/index.ts`), removed `faiss-node` & `@langchain/community`, updated `README.md` & `workflow-architecture.png`.
+
+## [2026-11-17] ingest | Codify 100% Client-Side AI invariant in .wiki, AGENTS.md, and README intro
+- Added **100% Client-Side AI & Zero Server User State** as a mandatory project invariant in `.wiki/AGENTS.md` and `name-tag/AGENTS.md`.
+- Updated the bilingual (EN/ZH) intro directly beneath the `README.md` title to explain the 100% browser-side AI & multi-user isolation guarantee.
