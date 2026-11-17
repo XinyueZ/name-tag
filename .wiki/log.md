@@ -183,3 +183,17 @@ Chronological append-only log of project milestones, ingests, builds, and lint c
 ## [2026-11-17] ingest | Codify 100% Client-Side AI invariant in .wiki, AGENTS.md, and README intro
 - Added **100% Client-Side AI & Zero Server User State** as a mandatory project invariant in `.wiki/AGENTS.md` and `name-tag/AGENTS.md`.
 - Updated the bilingual (EN/ZH) intro directly beneath the `README.md` title to explain the 100% browser-side AI & multi-user isolation guarantee.
+
+## [2026-11-17] ingest | Replace split-ratio badge with Expand/Collapse Fullscreen button & Esc toast
+- Removed `split.ratio` from `T.js` and replaced the top-right percentage badge in `NameTagWorkspace.tsx` with an MD3 Expand/Collapse icon button toggling `.nt-root.is-fullscreen`.
+- Added persistent semi-transparent top-center toast (`.nt-fullscreen-toast`) displaying 「按 ESC 退出全屏」 / 「Press ESC to exit fullscreen」 while fullscreen is active, plus `Esc` listener (respecting open modals first).
+- Updated `README.md` (EN & ZH) and style assertions in `granularity-and-assets.test.mjs`.
+
+## [2026-11-17] lint | Fix stale recognized bboxes when camera sees no segments
+- Updated `PocketCaptureManager.trackRecognizedBoxes()` to return `[]` when `liveKept.length === 0` and drop unmatched ghost boxes (`bestIoU < 0.25`).
+- Updated `NameTagWorkspace.tsx` to clear `recognizedDetections` immediately when `filterResult.kept.length === 0` (both in reactive effect and auto-capture loop).
+
+## [2026-11-17] milestone | Optimize continuous segmentation crops via detect.py tracking & sharpness scoring
+- Upgraded `CutoutAugmenter` with `PAD = 0.12`, 3×3 prototype mask dilation (`dilateBinaryMask`), and 96×96 Laplacian variance `computeCropQuality()`.
+- Added `ObjectCropTracker` (`src/client/core/ObjectCropTracker.ts`) implementing IoU tracking, `STABLE_FRAMES = 3` stability gating, salience ordering, sharpest-crop buffering across `REQUERY_MS = 2000`, and clean disappearance decay.
+- Wired `ObjectCropTracker` into `NameTagWorkspace.tsx` and added unit tests in `decoder-and-geometry.test.mjs`.

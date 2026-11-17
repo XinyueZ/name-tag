@@ -15,6 +15,9 @@ export interface CutoutPreviewItem {
  */
 export class CutoutAugmenter {
   private static readonly MAX_PREVIEW_DIM = 360
+  private static readonly DEFAULT_PAD_RATIO = 0.12
+  private static readonly QUALITY_SAMPLE_DIM = 96
+  private static readonly QUALITY_SHARP_CAP = 1200.0
   private static readonly ROTATE_DEG = 8
   private static readonly ZOOM_SCALE = 1.16
   private static readonly BLUR_PX = 1.6
@@ -37,7 +40,7 @@ export class CutoutAugmenter {
     instance: BoundingBox,
     frameW: number,
     frameH: number,
-    padRatio = 0.04,
+    padRatio = CutoutAugmenter.DEFAULT_PAD_RATIO,
   ): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
     const bw = Math.max(4, instance.x2 - instance.x1)
     const bh = Math.max(4, instance.y2 - instance.y1)
@@ -70,15 +73,16 @@ export class CutoutAugmenter {
       return null
     }
 
-    // 1. Paint binary prototype mask onto low-res mask canvas
+    // 1. Slightly dilate binary mask in prototype space so edge outlines are never shaved off
+    const dilatedMask = CutoutAugmenter.dilateBinaryMask(mData, mW, mH)
     const lowCanvas = document.createElement('canvas')
     lowCanvas.width = mW
     lowCanvas.height = mH
     const lowCtx = lowCanvas.getContext('2d')
     if (lowCtx === null) return null
     const lowImg = lowCtx.createImageData(mW, mH)
-    for (let i = 0; i < mData.length; i += 1) {
-      if (mData[i] !== 0) {
+    for (let i = 0; i < dilatedMask.length; i += 1) {
+      if (dilatedMask[i] !== 0) {
         const p = i * 4
         lowImg.data[p] = 255
         lowImg.data[p + 1] = 255
@@ -119,13 +123,91 @@ export class CutoutAugmenter {
     return hiCanvas
   }
 
+  public static dilateBinaryMask(mask: Uint8Array, width: number, height: number): Uint8Array {
+    if (width <= 0 || height <= 0 || mask.length !== width * height) return mask
+    const out = new Uint8Array(mask.length)
+    for (let y = 0; y < height; y += 1) {
+      const row = y * width
+      for (let x = 0; x < width; x += 1) {
+        if (mask[row + x] === 0) continue
+        const y0 = Math.max(0, y - 1)
+        const y1 = Math.min(height - 1, y + 1)
+        const x0 = Math.max(0, x - 1)
+        const x1 = Math.min(width - 1, x + 1)
+        for (let ny = y0; ny <= y1; ny += 1) {
+          const nRow = ny * width
+          for (let nx = x0; nx <= x1; nx += 1) {
+            out[nRow + nx] = 1
+          }
+        }
+      }
+    }
+    return out
+  }
+
+  private static qualityCanvas: HTMLCanvasElement | null = null
+  private static qualityCtx: CanvasRenderingContext2D | null = null
+
+  /** Compute detect.py-inspired crop quality: conf * sqrt(area) * min(Laplacian_var, 1200). */
+  public static computeCropQuality(
+    frameCanvas: HTMLCanvasElement,
+    instance: BoundingBox,
+  ): number {
+    const fw = frameCanvas.width
+    const fh = frameCanvas.height
+    const bw = instance.x2 - instance.x1
+    const bh = instance.y2 - instance.y1
+    if (fw <= 0 || fh <= 0 || bw < 8 || bh < 8) return 0
+    if (typeof document === 'undefined') return instance.score
+
+    const dim = CutoutAugmenter.QUALITY_SAMPLE_DIM
+    if (CutoutAugmenter.qualityCanvas === null) {
+      CutoutAugmenter.qualityCanvas = document.createElement('canvas')
+      CutoutAugmenter.qualityCanvas.width = dim
+      CutoutAugmenter.qualityCanvas.height = dim
+      CutoutAugmenter.qualityCtx = CutoutAugmenter.qualityCanvas.getContext('2d', { willReadFrequently: true })
+    }
+    const qCtx = CutoutAugmenter.qualityCtx
+    if (qCtx === null) return instance.score
+
+    const x1 = Math.max(0, Math.floor(instance.x1))
+    const y1 = Math.max(0, Math.floor(instance.y1))
+    const sw = Math.max(1, Math.min(fw - x1, Math.ceil(bw)))
+    const sh = Math.max(1, Math.min(fh - y1, Math.ceil(bh)))
+    qCtx.drawImage(frameCanvas, x1, y1, sw, sh, 0, 0, dim, dim)
+    const pixels = qCtx.getImageData(0, 0, dim, dim).data
+
+    const gray = new Float32Array(dim * dim)
+    for (let i = 0, p = 0; i < gray.length; i += 1, p += 4) {
+      gray[i] = 0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2]
+    }
+
+    let sum = 0
+    let sumSq = 0
+    let count = 0
+    for (let y = 1; y < dim - 1; y += 1) {
+      const row = y * dim
+      for (let x = 1; x < dim - 1; x += 1) {
+        const idx = row + x
+        const lap = gray[idx - dim] + gray[idx - 1] - 4 * gray[idx] + gray[idx + 1] + gray[idx + dim]
+        sum += lap
+        sumSq += lap * lap
+        count += 1
+      }
+    }
+    const mean = count > 0 ? sum / count : 0
+    const variance = count > 0 ? Math.max(0, sumSq / count - mean * mean) : 0
+    const areaRatio = Math.max(0, (bw * bh) / (fw * fh))
+    return instance.score * Math.sqrt(areaRatio) * Math.min(variance, CutoutAugmenter.QUALITY_SHARP_CAP)
+  }
+
   public static extractRawBboxCrop(
     frameCanvas: HTMLCanvasElement,
     instance: BoundingBox,
   ): HTMLCanvasElement {
     const frameW = frameCanvas.width
     const frameH = frameCanvas.height
-    const crop = CutoutAugmenter.computeCropBounds(instance, frameW, frameH, 0.04)
+    const crop = CutoutAugmenter.computeCropBounds(instance, frameW, frameH, CutoutAugmenter.DEFAULT_PAD_RATIO)
     const scale = Math.min(1, CutoutAugmenter.MAX_PREVIEW_DIM / Math.max(crop.w, crop.h))
     const outW = Math.max(8, Math.round(crop.w * scale))
     const outH = Math.max(8, Math.round(crop.h * scale))
@@ -147,7 +229,7 @@ export class CutoutAugmenter {
   ): HTMLCanvasElement {
     const frameW = frameCanvas.width
     const frameH = frameCanvas.height
-    const crop = CutoutAugmenter.computeCropBounds(instance, frameW, frameH, 0.04)
+    const crop = CutoutAugmenter.computeCropBounds(instance, frameW, frameH, CutoutAugmenter.DEFAULT_PAD_RATIO)
     const scale = Math.min(1, CutoutAugmenter.MAX_PREVIEW_DIM / Math.max(crop.w, crop.h))
     const outW = Math.max(8, Math.round(crop.w * scale))
     const outH = Math.max(8, Math.round(crop.h * scale))

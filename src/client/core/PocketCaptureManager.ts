@@ -54,8 +54,7 @@ export class PocketCaptureManager {
     recognized: readonly RecognizedDetection[],
     liveKept: readonly BoundingBox[],
   ): RecognizedDetection[] {
-    if (recognized.length === 0) return []
-    if (liveKept.length === 0) return recognized.slice()
+    if (recognized.length === 0 || liveKept.length === 0) return []
     const tracked: RecognizedDetection[] = []
     for (let i = 0; i < recognized.length; i += 1) {
       const det = recognized[i]
@@ -79,7 +78,7 @@ export class PocketCaptureManager {
           bestLive = liveKept[j]
         }
       }
-      if (bestLive !== null && bestIoU >= 0.4) {
+      if (bestLive !== null && bestIoU >= 0.25) {
         tracked.push({
           ...det,
           x1: bestLive.x1,
@@ -87,8 +86,6 @@ export class PocketCaptureManager {
           x2: bestLive.x2,
           y2: bestLive.y2,
         })
-      } else {
-        tracked.push(det)
       }
     }
     return tracked

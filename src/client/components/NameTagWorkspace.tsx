@@ -5,6 +5,7 @@ import { CutoutAugmenter, type CutoutPreviewItem } from '../core/CutoutAugmenter
 import { FastSamInferenceEngine, type ExecutionProviderKind } from '../core/FastSamInferenceEngine'
 import { Gemma2EmbeddingEngine, Gemma2LangChainEmbeddings } from '../core/Gemma2EmbeddingEngine'
 import { BrowserTargetVectorRepository } from '../core/BrowserVectorStore'
+import { ObjectCropTracker } from '../core/ObjectCropTracker'
 import { PocketCaptureManager, type PocketItem } from '../core/PocketCaptureManager'
 import { GranularityFilter } from '../core/GranularityFilter'
 import { LocaleService, type TranslateFn } from '../core/LocaleService'
@@ -40,6 +41,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const embedLangChainRef = useRef<Gemma2LangChainEmbeddings | null>(null)
   const embedLoadPromiseRef = useRef<Promise<boolean> | null>(null)
   const vectorRepoRef = useRef<BrowserTargetVectorRepository | null>(null)
+  const trackerRef = useRef<ObjectCropTracker | null>(null)
   const modelLoadPromiseRef = useRef<Promise<boolean> | null>(null)
 
   if (cameraRef.current === null) cameraRef.current = new CameraController()
@@ -53,10 +55,14 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   if (vectorRepoRef.current === null && embedLangChainRef.current !== null) {
     vectorRepoRef.current = new BrowserTargetVectorRepository(embedLangChainRef.current)
   }
+  if (trackerRef.current === null) {
+    trackerRef.current = new ObjectCropTracker()
+  }
 
   const [isDark, setIsDark] = useState<boolean>(() => ThemeService.isDarkTheme())
   const [, setLangTick] = useState<number>(0)
   const [leftRatio, setLeftRatio] = useState<number>(SplitPaneGeometry.DEFAULT_RATIO)
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false)
 
   const [cameraActive, setCameraActive] = useState<boolean>(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -118,6 +124,18 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   useEffect(() => {
     return LocaleService.observeLanguageChange(() => setLangTick((v) => v + 1))
   }, [])
+
+  useEffect(() => {
+    if (!isFullscreen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && tagModalItems === null && !dbModalOpen) {
+        event.preventDefault()
+        setIsFullscreen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [dbModalOpen, isFullscreen, tagModalItems])
 
   useEffect(() => {
     let active = true
@@ -230,6 +248,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   }, [])
 
   const handleClearCache = useCallback(async () => {
+    trackerRef.current?.reset()
     setRecognizedDetections([])
     await cacheStoreRef.current?.clearIndexedDb()
     await engineRef.current?.dispose()
@@ -291,6 +310,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
 
   const stopCamera = useCallback(() => {
     cameraRef.current?.stop(videoRef.current)
+    trackerRef.current?.reset()
     setCameraActive(false)
     setRawBoxes([])
     setRecognizedDetections([])
@@ -388,7 +408,31 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     [recognizedDetections, filterResult.kept],
   )
 
-  // Automatic continuous capture & vector matching while camera + both models + non-empty DB are active
+  // Update multi-frame ObjectCropTracker on every filtered FastSAM-s frame to buffer the sharpest crops
+  useEffect(() => {
+    const tracker = trackerRef.current
+    if (!tracker) return
+    if (!cameraActive || modelPhase !== 'ready' || tagModalItems !== null || dbModalOpen) return
+
+    const video = videoRef.current
+    const fw = resolution.w > 0 ? resolution.w : 1280
+    const fh = resolution.h > 0 ? resolution.h : 720
+    if (filterResult.kept.length === 0) {
+      tracker.updateFrame(null, [], fw, fh, Date.now())
+      if (recognizedDetections.length > 0) setRecognizedDetections([])
+      return
+    }
+
+    if (vectorStats.totalVectors <= 0 || !video || video.readyState < 2 || video.videoWidth <= 0) {
+      return
+    }
+
+    const frameCanvas = CutoutAugmenter.captureVideoFrame(video)
+    tracker.updateFrame(frameCanvas, filterResult.kept, frameCanvas.width, frameCanvas.height, Date.now())
+    setRecognizedDetections(tracker.getRecognizedDetections(filterResult.kept))
+  }, [cameraActive, dbModalOpen, filterResult, modelPhase, resolution.h, resolution.w, tagModalItems, vectorStats.totalVectors])
+
+  // Query due stable tracks using their buffered sharpest crops (detect.py cadence)
   useEffect(() => {
     if (
       !cameraActive ||
@@ -403,85 +447,73 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     let cancelled = false
     let timerId: number | null = null
 
-    const captureAndMatch = async (): Promise<void> => {
+    const queryStableTracks = async (): Promise<void> => {
       if (cancelled) return
-      const video = videoRef.current
+      const tracker = trackerRef.current
       const langChainEmbeddings = embedLangChainRef.current
       const vectorRepo = vectorRepoRef.current
       const kept = keptRef.current
 
-      if (video && langChainEmbeddings && vectorRepo && video.readyState >= 2 && video.videoWidth > 0 && kept.length > 0) {
-        try {
-          const frameCanvas = CutoutAugmenter.captureVideoFrame(video)
-          const candidates = kept.slice(0, 8)
-          const queryCutoutUrls: string[] = []
-          const rawPocketUrls: string[] = []
-          for (let i = 0; i < candidates.length; i += 1) {
-            const cutoutCanvas = CutoutAugmenter.extractTransparentCutout(frameCanvas, candidates[i])
-            queryCutoutUrls.push(cutoutCanvas.toDataURL('image/png'))
-            const rawCropCanvas = CutoutAugmenter.extractRawBboxCrop(frameCanvas, candidates[i])
-            rawPocketUrls.push(rawCropCanvas.toDataURL('image/png'))
-          }
-          const vectors = await langChainEmbeddings.embedImages(queryCutoutUrls)
-          if (!cancelled && vectors.length > 0) {
-            const searchRes = await vectorRepo.searchMatches(vectors, matchThresholdRef.current)
-            if (!cancelled) {
-              setMatchError(null)
-              const rawHits = searchRes.results.filter(
-                (hit) => hit.matched && hit.targetId !== null && Boolean(rawPocketUrls[hit.index]),
-              )
-              const matchedItems: PocketItem[] = []
-              const liveRecognized: RecognizedDetection[] = []
-              const nowTs = Date.now()
-              for (let i = 0; i < rawHits.length; i += 1) {
-                const hit = rawHits[i]
-                const tid = hit.targetId as string
-                const resolvedTitle = typeof hit.title === 'string' ? hit.title.trim() : ''
-                if (resolvedTitle.length === 0) continue
-                const cand = candidates[hit.index]
-                matchedItems.push({
-                  targetId: tid,
-                  title: resolvedTitle,
-                  dataUrl: rawPocketUrls[hit.index],
-                  capturedAt: nowTs,
-                })
-                if (cand) {
-                  liveRecognized.push({
-                    targetId: tid,
-                    title: resolvedTitle,
-                    x1: cand.x1,
-                    y1: cand.y1,
-                    x2: cand.x2,
-                    y2: cand.y2,
-                    colorIndex: cand.colorIndex,
-                    recognizedAt: nowTs,
-                  })
+      if (kept.length === 0) {
+        if (!cancelled) setRecognizedDetections([])
+      } else if (tracker && langChainEmbeddings && vectorRepo) {
+        const dueTracks = tracker.collectDueTracks(Date.now())
+        if (dueTracks.length > 0) {
+          try {
+            const vectors = await langChainEmbeddings.embedImages(dueTracks.map((t) => t.queryCutoutUrl))
+            if (!cancelled && vectors.length > 0) {
+              const searchRes = await vectorRepo.searchMatches(vectors, matchThresholdRef.current)
+              if (!cancelled) {
+                setMatchError(null)
+                const matchedItems: PocketItem[] = []
+                const nowTs = Date.now()
+                for (let i = 0; i < searchRes.results.length; i += 1) {
+                  const hit = searchRes.results[i]
+                  const due = dueTracks[hit.index]
+                  if (!due) continue
+                  const resolvedTitle = typeof hit.title === 'string' ? hit.title.trim() : ''
+                  const isHit = hit.matched && hit.targetId !== null && resolvedTitle.length > 0
+                  tracker.applyMatchResult(
+                    due.trackId,
+                    isHit,
+                    isHit ? hit.targetId : null,
+                    isHit ? resolvedTitle : null,
+                    nowTs,
+                  )
+                  if (isHit) {
+                    matchedItems.push({
+                      targetId: hit.targetId as string,
+                      title: resolvedTitle,
+                      dataUrl: due.rawPocketUrl,
+                      capturedAt: nowTs,
+                    })
+                  }
+                }
+                setRecognizedDetections(tracker.getRecognizedDetections(keptRef.current))
+                if (matchedItems.length > 0) {
+                  setPocketItems((prev) => PocketCaptureManager.mergeMatches(prev, matchedItems))
+                  setPocketOpen(true)
                 }
               }
-              setRecognizedDetections(liveRecognized)
-              if (matchedItems.length > 0) {
-                setPocketItems((prev) => PocketCaptureManager.mergeMatches(prev, matchedItems))
-                setPocketOpen(true)
-              }
             }
-          }
-        } catch (err: unknown) {
-          if (!cancelled) {
-            setMatchError(err instanceof Error ? err.message : String(err))
+          } catch (err: unknown) {
+            if (!cancelled) {
+              setMatchError(err instanceof Error ? err.message : String(err))
+            }
           }
         }
       }
 
       if (!cancelled) {
         timerId = window.setTimeout(() => {
-          void captureAndMatch()
-        }, 900)
+          void queryStableTracks()
+        }, 280)
       }
     }
 
     timerId = window.setTimeout(() => {
-      void captureAndMatch()
-    }, 450)
+      void queryStableTracks()
+    }, 280)
 
     return () => {
       cancelled = true
@@ -540,6 +572,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   }, [])
 
   const handleClearVectorDb = useCallback(async (): Promise<void> => {
+    trackerRef.current?.reset()
     await vectorRepoRef.current?.clearAll()
     setVectorStats({ totalTargets: 0, totalVectors: 0 })
     setDbRows([])
@@ -576,18 +609,51 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     setTagModalItems(null)
   }, [embedError, ensureEmbeddingReady, tagModalItems])
 
-  const rightRatio = Number((100 - leftRatio).toFixed(1))
+  const fullscreenBtnLabel = locale.translate(
+    isFullscreen ? 'workspace.exitFullscreen' : 'workspace.enterFullscreen',
+  )
 
   return (
-    <div ref={workspaceRootRef} className="nt-root" data-conversation-composer-overlay="">
+    <div
+      ref={workspaceRootRef}
+      className={isFullscreen ? 'nt-root is-fullscreen' : 'nt-root'}
+      data-conversation-composer-overlay=""
+    >
+      {isFullscreen ? (
+        <div className="nt-fullscreen-toast" role="status" aria-live="polite">
+          {locale.translate('workspace.escToast')}
+        </div>
+      ) : null}
+
       <header className="nt-topbar">
         <div className="nt-brand">
           <span className="nt-brand-title">{locale.translate('workspace.title')}</span>
           <span className="nt-brand-sub">{locale.translate('workspace.subtitle')}</span>
         </div>
-        <span className="nt-slider-badge">
-          {locale.translate('split.ratio', { left: Math.round(leftRatio), right: Math.round(rightRatio) })}
-        </span>
+        <button
+          type="button"
+          className="nt-icon-btn"
+          aria-label={fullscreenBtnLabel}
+          title={fullscreenBtnLabel}
+          aria-pressed={isFullscreen}
+          onClick={() => setIsFullscreen((prev) => !prev)}
+        >
+          {isFullscreen ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="4 14 10 14 10 20" />
+              <polyline points="20 10 14 10 14 4" />
+              <line x1="14" y1="10" x2="21" y2="3" />
+              <line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="15 3 21 3 21 9" />
+              <polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" />
+              <line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          )}
+        </button>
       </header>
 
       <div ref={splitContainerRef} className="nt-split-container">

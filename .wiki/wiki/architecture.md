@@ -28,6 +28,7 @@ All runtime logic is encapsulated in single-responsibility classes under `src/cl
 - `Gemma2EmbeddingEngine` & `Gemma2LangChainEmbeddings` (`src/client/core/Gemma2EmbeddingEngine.ts`): Client-side EmbeddingGemma 2 (`onnx-community/embeddinggemma-2-ONNX`) encoder & LangChain `Embeddings` subclass.
 - `IndexedDbLangChainVectorStore` & `BrowserTargetVectorRepository` (`src/client/core/BrowserVectorStore.ts`): 100% browser-local LangChain `VectorStore` persisted in Browser IndexedDB (`dsh-name-tag-vectors`), storing 6-vector target indices + metadata with zero server state.
 - `VectorTableFormatter` (`src/client/core/VectorTableFormatter.ts`) & `VectorDbModal` (`src/client/components/VectorDbModal.tsx`): 5-column database inspector (`index`, `augmentation`, `title`, `description`, `timestamp`) with 5-head/5-tail vector formatting and resizable `title`/`description` columns.
+- `ObjectCropTracker` (`src/client/core/ObjectCropTracker.ts`): Multi-frame IoU stability tracker (`STABLE_FRAMES = 3`, `REQUERY_MS = 2000`) buffering the sharpest 12%-padded dilated cutout per object.
 - `PocketCaptureManager` (`src/client/core/PocketCaptureManager.ts`) & `PocketFloatingWindow` (`src/client/components/PocketFloatingWindow.tsx`): Deduplicated match accumulator (`targetId`) and draggable narrow vertical Pocket window.
 
 ## 3. Atomic UI Component Hierarchy

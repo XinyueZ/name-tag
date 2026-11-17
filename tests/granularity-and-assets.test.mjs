@@ -92,6 +92,8 @@ test('NameTagStyles and ColorPalette produce valid MD3 CSS and distinct colors',
   assert.match(darkCss, /\.nt-pocket-header/)
   assert.match(darkCss, /\.nt-pocket-item-title/)
   assert.match(darkCss, /\.nt-btn-danger-outlined/)
+  assert.match(darkCss, /\.nt-root\.is-fullscreen/)
+  assert.match(darkCss, /\.nt-fullscreen-toast/)
   assert.match(lightCss, /\.nt-md-card/)
   assert.notEqual(ColorPalette.strokeFor(0), ColorPalette.strokeFor(1))
 })

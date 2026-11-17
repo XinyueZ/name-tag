@@ -12,7 +12,9 @@ export class TranslationCatalog {
     'workspace.title': 'Name Tag · 实时物件分割工作台',
     'workspace.subtitle': 'FastSAM-s 端侧无类别实例分割 + 实时颗粒度抑制',
     'split.handleTitle': '拖动调整左右分栏比例（双击重置 50 / 50）',
-    'split.ratio': '{left}% / {right}%',
+    'workspace.enterFullscreen': '全屏显示',
+    'workspace.exitFullscreen': '退出全屏 (Esc)',
+    'workspace.escToast': '按 ESC 退出全屏',
     'panel.header': '功能区',
 
     // Camera Viewport & Controls
@@ -151,7 +153,9 @@ export class TranslationCatalog {
     'workspace.title': 'Name Tag · Live Object Segmentation Studio',
     'workspace.subtitle': 'Client-side FastSAM-s class-agnostic segmentation + real-time granularity filter',
     'split.handleTitle': 'Drag to resize split panes (double-click to reset 50 / 50)',
-    'split.ratio': '{left}% / {right}%',
+    'workspace.enterFullscreen': 'Enter fullscreen',
+    'workspace.exitFullscreen': 'Exit fullscreen (Esc)',
+    'workspace.escToast': 'Press ESC to exit fullscreen',
     'panel.header': 'Controls',
 
     // Camera Viewport & Controls

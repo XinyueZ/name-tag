@@ -268,6 +268,7 @@ test('PocketCaptureManager deduplicates by targetId and clamps floating window p
   )
   assert.equal(tracked[0].title, 'Xinyue')
   assert.equal(tracked[0].x1, 105)
+  assert.equal(PocketCaptureManager.trackRecognizedBoxes(tracked, []).length, 0)
 })
 
 test('BrowserTargetVectorRepository stores 6 vectors via LangChain VectorStore, searches by cosine similarity, and clears cleanly', async () => {
@@ -313,6 +314,36 @@ test('BrowserTargetVectorRepository stores 6 vectors via LangChain VectorStore, 
   const afterClear = await repo.getStats()
   assert.equal(afterClear.totalTargets, 0)
   assert.equal(afterClear.totalVectors, 0)
+})
+
+test('CutoutAugmenter.dilateBinaryMask expands foreground mask by 1px and ObjectCropTracker buffers sharpest crop across stable frames', async () => {
+  const clientExports = await loadBuiltClientBundle()
+  const { CutoutAugmenter, ObjectCropTracker } = clientExports
+  const mask = new Uint8Array(25)
+  mask[12] = 1
+  const dilated = CutoutAugmenter.dilateBinaryMask(mask, 5, 5)
+  let count = 0
+  for (let i = 0; i < dilated.length; i += 1) count += dilated[i]
+  assert.equal(count, 9)
+
+  const tracker = new ObjectCropTracker()
+  const box = { id: 'b1', x1: 100, y1: 100, x2: 300, y2: 300, score: 0.9, area: 40000, colorIndex: 0 }
+  let seq = 0
+  const qualities = [10, 85, 30]
+  for (let f = 0; f < 3; f += 1) {
+    const idx = f
+    tracker.updateFrame(null, [box], 640, 480, 10_000 + f * 100, () => qualities[idx], () => {
+      seq += 1
+      return { queryCutoutUrl: 'q-' + idx, rawPocketUrl: 'r-' + idx }
+    })
+    if (f < 2) {
+      assert.equal(tracker.collectDueTracks(10_000 + f * 100).length, 0)
+    }
+  }
+  const due = tracker.collectDueTracks(10_300)
+  assert.equal(due.length, 1)
+  assert.equal(due[0].queryCutoutUrl, 'q-1')
+  assert.equal(seq, 2)
 })
 
 test('SplitPaneGeometry clamps split ratio within [26, 74]', async () => {

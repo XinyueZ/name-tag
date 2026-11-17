@@ -16,6 +16,7 @@ Content catalog for the **`name-tag`** DSH Web plugin project. Read this index f
 - [005-vector-db-table-viewer.md](./raw/005-vector-db-table-viewer.md) — Database button next to Mirror and 4-column table modal with resizable title/description columns.
 - [006-auto-capture-pocket-window.md](./raw/006-auto-capture-pocket-window.md) — Continuous auto-capture matching against FAISS with 0..1 similarity slider (default 0.78) and draggable floating Pocket window.
 - [008-full-client-side-browser-migration.md](./raw/008-full-client-side-browser-migration.md) — Migration of vector DB and preferences 100% to Browser IndexedDB/localStorage for multi-user isolation.
+- [009-crop-quality-and-track-stability.md](./raw/009-crop-quality-and-track-stability.md) — 12% padded dilated crop, Laplacian sharpness scoring, and multi-frame ObjectCropTracker.
 
 ## Wiki Pages (Maintained)
 - [architecture.md](./wiki/architecture.md) — Dual-face DSH plugin structure, OOP classes, and atomic component hierarchy.

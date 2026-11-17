@@ -12,6 +12,7 @@ export { Gemma2EmbeddingEngine, Gemma2LangChainEmbeddings } from './core/Gemma2E
 export { VectorTableFormatter } from './core/VectorTableFormatter'
 export { PocketCaptureManager } from './core/PocketCaptureManager'
 export { BrowserTargetVectorRepository, IndexedDbLangChainVectorStore } from './core/BrowserVectorStore'
+export { ObjectCropTracker } from './core/ObjectCropTracker'
 
 export const name = '@deepseek-ai/dsh-client-name-tag/client'
 export const inject = ['slots', 'locale']

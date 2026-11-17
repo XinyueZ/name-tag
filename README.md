@@ -95,7 +95,7 @@ The application forms a clean **two-stage closed loop** on top of live class-agn
 
 #### A. Top Bar & Split-Screen Layout
 - **`Name Tag` Tab**: Mounted at the far right of DSH Web's `conversation.view` tab strip (`order: 999`).
-- **Workspace Header**: Displays the studio title and live left/right split ratio badge (e.g., `50% / 50%`).
+- **Workspace Header**: Displays the studio title and a top-right **Expand / Collapse Fullscreen** icon button. In fullscreen mode, a persistent semi-transparent top-center toast reminds the user to press `ESC` to exit (clicking the collapse button also exits).
 - **Center Divider Handle (`SplitPaneDivider`)**: Drag horizontally to resize camera viewport vs. control panel (`26% ~ 74%`); double-click to reset `50 / 50`.
 
 #### B. Left Pane — Live Camera Viewport (`CameraViewport`)
@@ -206,7 +206,7 @@ pnpm dsh web
 
 #### A. 顶部导航与左右分栏布局
 - **`Name Tag` 选项卡**：固定位于 DSH Web 会话顶部选项卡的最右侧（`order: 999`）。
-- **工作台顶栏**：展示应用标题与当前左右分栏比例胶囊（如 `50% / 50%`）。
+- **工作台顶栏**：展示应用标题与右上角 **全屏展开 / 退出全屏** 图标按钮；进入全屏后顶部居中会长时间漂浮一个半透明 Toast 提示「按 ESC 退出全屏」（按 `ESC` 或再次点击收起按钮均可退出）。
 - **中间分栏拖动把手（`SplitPaneDivider`）**：支持左右横向拖拽调节摄像头区域与右侧功能区宽度（`26% ~ 74%`），双击重置为 `50 / 50`。
 
 #### B. 左侧视窗 — 实时摄像头区域（`CameraViewport`）
