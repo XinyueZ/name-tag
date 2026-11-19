@@ -47,10 +47,22 @@ export interface SavedGranularityPreset {
   readonly savedAt: number
 }
 
+export interface CameraScopeItemData {
+  readonly id: string
+  readonly text: string
+  readonly editable: boolean
+}
+
+export interface CameraScopeStateData {
+  readonly selectedId: string
+  readonly customItems: readonly CameraScopeItemData[]
+}
+
 export interface NameTagPreferences {
   readonly granularity: GranularityParams
   readonly granularityCardCollapsed?: boolean
   readonly savedPresets?: readonly SavedGranularityPreset[]
+  readonly cameraScopes?: CameraScopeStateData
 }
 
 export interface BoundingBox {

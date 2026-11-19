@@ -11,6 +11,7 @@ import { GranularityFilter } from '../core/GranularityFilter'
 import { LocaleService, type TranslateFn } from '../core/LocaleService'
 import { ModelCacheStore, type ModelLoadSource } from '../core/ModelCacheStore'
 import { PreferencesStore } from '../core/PreferencesStore'
+import { CameraScopeCollection, type CameraScopeAddStatus } from '../core/CameraScopeModels'
 import { GranularitySettings, SavedPresetItem } from '../core/SavedPresetModels'
 import { ThemeService } from '../core/ThemeService'
 import { CameraControlStrip } from './CameraControlStrip'
@@ -97,6 +98,9 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const [savedPresets, setSavedPresets] = useState<readonly SavedPresetItem[]>(() => {
     return prefStoreRef.current?.loadLocal()?.savedPresets ?? []
   })
+  const [scopeCollection, setScopeCollection] = useState<CameraScopeCollection>(() => {
+    return prefStoreRef.current?.loadLocal()?.cameraScopes ?? CameraScopeCollection.createDefault()
+  })
   const [showProbLabels, setShowProbLabels] = useState<boolean>(false)
   const [rawBoxes, setRawBoxes] = useState<readonly BoundingBox[]>([])
   const [inferMs, setInferMs] = useState<number>(0)
@@ -128,7 +132,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   useEffect(() => {
     if (!isFullscreen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && tagModalItems === null && !dbModalOpen) {
+      if (event.key === 'Escape' && !event.defaultPrevented && tagModalItems === null && !dbModalOpen) {
         event.preventDefault()
         setIsFullscreen(false)
       }
@@ -267,6 +271,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     setFps(0)
     setVectorStats({ totalTargets: 0, totalVectors: 0 })
     setSavedPresets([])
+    setScopeCollection(CameraScopeCollection.createDefault())
     setGranularity(GranularityFilter.fromPreset('coarse', false))
     setGranularityCollapsed(false)
     setMatchThreshold(DEFAULT_MATCH_THRESHOLD)
@@ -609,6 +614,61 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     setTagModalItems(null)
   }, [embedError, ensureEmbeddingReady, tagModalItems])
 
+  const handleAddScope = useCallback((text: string): CameraScopeAddStatus => {
+    const labels = {
+      all: locale.translate('scope.all'),
+      humanFace: locale.translate('scope.humanFace'),
+    }
+    const result = scopeCollection.addItem(text, labels)
+    if (result.status === 'added') {
+      setScopeCollection(result.collection)
+      prefStoreRef.current?.saveWorkspace({
+        granularity,
+        granularityCardCollapsed: granularityCollapsed,
+        savedPresets,
+        cameraScopes: result.collection,
+      })
+    }
+    return result.status
+  }, [granularity, granularityCollapsed, locale, savedPresets, scopeCollection])
+
+  const handleSelectScope = useCallback((id: string) => {
+    const next = scopeCollection.selectItem(id)
+    setScopeCollection(next)
+    prefStoreRef.current?.saveWorkspace({
+      granularity,
+      granularityCardCollapsed: granularityCollapsed,
+      savedPresets,
+      cameraScopes: next,
+    })
+  }, [granularity, granularityCollapsed, savedPresets, scopeCollection])
+
+  const handleRenameScope = useCallback((id: string, nextText: string) => {
+    const labels = {
+      all: locale.translate('scope.all'),
+      humanFace: locale.translate('scope.humanFace'),
+    }
+    const next = scopeCollection.renameItem(id, nextText, labels)
+    setScopeCollection(next)
+    prefStoreRef.current?.saveWorkspace({
+      granularity,
+      granularityCardCollapsed: granularityCollapsed,
+      savedPresets,
+      cameraScopes: next,
+    })
+  }, [granularity, granularityCollapsed, locale, savedPresets, scopeCollection])
+
+  const handleDeleteScope = useCallback((id: string) => {
+    const next = scopeCollection.removeItem(id)
+    setScopeCollection(next)
+    prefStoreRef.current?.saveWorkspace({
+      granularity,
+      granularityCardCollapsed: granularityCollapsed,
+      savedPresets,
+      cameraScopes: next,
+    })
+  }, [granularity, granularityCollapsed, savedPresets, scopeCollection])
+
   const fullscreenBtnLabel = locale.translate(
     isFullscreen ? 'workspace.exitFullscreen' : 'workspace.enterFullscreen',
   )
@@ -672,6 +732,11 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
             modelStatusBadge={modelMessage}
             fps={fps}
             locale={locale}
+            scopeCollection={scopeCollection}
+            onAddScope={handleAddScope}
+            onSelectScope={handleSelectScope}
+            onRenameScope={handleRenameScope}
+            onDeleteScope={handleDeleteScope}
             onSelectInstance={handleSelectInstance}
           />
         </div>
@@ -735,7 +800,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
               prefStoreRef.current?.saveWorkspace({
                 granularity: nextParams,
                 granularityCardCollapsed: granularityCollapsed,
-                savedPresets: unselected
+                savedPresets: unselected,
+                cameraScopes: scopeCollection,
               })
             }}
             onToggleProbLabels={() => setShowProbLabels((prev) => !prev)}
@@ -755,7 +821,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
               prefStoreRef.current?.saveWorkspace({
                 granularity,
                 granularityCardCollapsed: granularityCollapsed,
-                savedPresets: nextSaved
+                savedPresets: nextSaved,
+                cameraScopes: scopeCollection,
               })
             }}
             onSelectSavedPreset={(presetId) => {
@@ -768,7 +835,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
               prefStoreRef.current?.saveWorkspace({
                 granularity: nextParams,
                 granularityCardCollapsed: granularityCollapsed,
-                savedPresets: nextSaved
+                savedPresets: nextSaved,
+                cameraScopes: scopeCollection,
               })
             }}
             onRenameSavedPreset={(presetId, nextText) => {
@@ -778,7 +846,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
               prefStoreRef.current?.saveWorkspace({
                 granularity,
                 granularityCardCollapsed: granularityCollapsed,
-                savedPresets: nextSaved
+                savedPresets: nextSaved,
+                cameraScopes: scopeCollection,
               })
             }}
             onDeleteSavedPreset={(presetId) => {
@@ -787,7 +856,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
               prefStoreRef.current?.saveWorkspace({
                 granularity,
                 granularityCardCollapsed: granularityCollapsed,
-                savedPresets: nextSaved
+                savedPresets: nextSaved,
+                cameraScopes: scopeCollection,
               })
             }}
             onToggleCollapse={() => {
@@ -796,7 +866,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
                 prefStoreRef.current?.saveWorkspace({
                   granularity,
                   granularityCardCollapsed: nextCollapsed,
-                  savedPresets
+                  savedPresets,
+                  cameraScopes: scopeCollection,
                 })
                 return nextCollapsed
               })

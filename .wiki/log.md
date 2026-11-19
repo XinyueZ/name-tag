@@ -197,3 +197,16 @@ Chronological append-only log of project milestones, ingests, builds, and lint c
 - Upgraded `CutoutAugmenter` with `PAD = 0.12`, 3×3 prototype mask dilation (`dilateBinaryMask`), and 96×96 Laplacian variance `computeCropQuality()`.
 - Added `ObjectCropTracker` (`src/client/core/ObjectCropTracker.ts`) implementing IoU tracking, `STABLE_FRAMES = 3` stability gating, salience ordering, sharpest-crop buffering across `REQUERY_MS = 2000`, and clean disappearance decay.
 - Wired `ObjectCropTracker` into `NameTagWorkspace.tsx` and added unit tests in `decoder-and-geometry.test.mjs`.
+
+## [2026-11-19] ingest | Add editable camera scope dropdown at top-left of camera viewport
+- Added immutable OOP domain classes `CameraScopeItem` and `CameraScopeCollection` (`src/client/core/CameraScopeModels.ts`) and shared preference types in `src/invariant.ts`.
+- Added atomic `CameraScopeDropdown` component (`src/client/components/CameraScopeDropdown.tsx`) mounted at top-left of `CameraViewport` (`.nt-camera-hud-left`, `z-index: 20` above `.nt-camera-empty`), supporting immutable default 「所有 / All」, continuous IME-safe `Enter`-to-add input, inline `✎` rename for custom items, and per-item `×` deletion.
+- Persisted `cameraScopes` browser-locally in `PreferencesStore` (`localStorage`) with automatic reset on Clear Cache, added bilingual `scope.*` keys to `T.js` and pure MD3 styles to `S.js`, and added unit tests in `tests/decoder-and-geometry.test.mjs` and `tests/granularity-and-assets.test.mjs` (19/19 passing).
+
+## [2026-11-19] ingest | Add immutable Human Face option and 5s/60s non-dismissible Tips bubble
+- Extended `CameraScopeItem` / `CameraScopeCollection` (`src/client/core/CameraScopeModels.ts`) with built-in locked `HUMAN_FACE_ID = 'human-face'` (「人脸」 / 「Human Face」) that cannot be edited, deleted, or duplicated.
+- Added OOP `CameraTipsScheduler` (`src/client/core/CameraTipsScheduler.ts`) and rendered `.nt-scope-tips-bubble` at the top-left of `CameraScopeDropdown.tsx` (with `.nt-camera-media` clipping wrapper in `CameraViewport.tsx` so the bubble never clips): pops up for 5s on every camera start, repeats every 60s while active, and cannot be dismissed by the user (`pointer-events: none`, no close button).
+- Updated `T.js` (135 EN/ZH keys in parity, 0 unused), `S.js`, and unit tests (`20/20` passing).
+
+## [2026-11-19] ingest | Upgrade floating Tips bubble to vibrant warm golden-amber gradient
+- Restyled `.nt-scope-tips-bubble`, `::after`, and `.nt-scope-tips-badge` in `src/client/S.js` with a warm sunrise gradient (`#ffe066` -> `#ffb732` -> `#ff9248`), high-contrast `#241400` typography, dark-gold `Tips` badge, spring pop-in animation, and subtle amber glow so it stands out clearly on both dark and light themes.

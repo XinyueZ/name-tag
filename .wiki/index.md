@@ -17,6 +17,8 @@ Content catalog for the **`name-tag`** DSH Web plugin project. Read this index f
 - [006-auto-capture-pocket-window.md](./raw/006-auto-capture-pocket-window.md) — Continuous auto-capture matching against FAISS with 0..1 similarity slider (default 0.78) and draggable floating Pocket window.
 - [008-full-client-side-browser-migration.md](./raw/008-full-client-side-browser-migration.md) — Migration of vector DB and preferences 100% to Browser IndexedDB/localStorage for multi-user isolation.
 - [009-crop-quality-and-track-stability.md](./raw/009-crop-quality-and-track-stability.md) — 12% padded dilated crop, Laplacian sharpness scoring, and multi-frame ObjectCropTracker.
+- [010-camera-scope-editable-dropdown.md](./raw/010-camera-scope-editable-dropdown.md) — Top-left editable camera dropdown with immutable default “所有” (All), continuous Enter-to-add input, and per-item `×` deletion.
+- [011-human-face-scope-and-tips-bubble.md](./raw/011-human-face-scope-and-tips-bubble.md) — Built-in immutable “人脸” (Human Face) option and non-dismissible 5s/60s floating Tips bubble on camera start.
 
 ## Wiki Pages (Maintained)
 - [architecture.md](./wiki/architecture.md) — Dual-face DSH plugin structure, OOP classes, and atomic component hierarchy.

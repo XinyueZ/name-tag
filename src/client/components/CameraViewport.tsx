@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import type { BoundingBox, GranularityFilterResult, RecognizedDetection } from '../../invariant'
+import type { CameraScopeAddStatus, CameraScopeCollection } from '../core/CameraScopeModels'
 import { ColorPalette } from '../core/ColorPalette'
 import type { LocaleService } from '../core/LocaleService'
+import { CameraScopeDropdown } from './CameraScopeDropdown'
 
 export interface CameraViewportProps {
   readonly videoRef: React.RefObject<HTMLVideoElement>
@@ -17,6 +19,11 @@ export interface CameraViewportProps {
   readonly modelStatusBadge: string
   readonly fps: number
   readonly locale: LocaleService
+  readonly scopeCollection: CameraScopeCollection
+  readonly onAddScope: (text: string) => CameraScopeAddStatus
+  readonly onSelectScope: (id: string) => void
+  readonly onRenameScope: (id: string, nextText: string) => void
+  readonly onDeleteScope: (id: string) => void
   readonly onSelectInstance?: (instance: BoundingBox) => void
 }
 
@@ -370,84 +377,99 @@ export function CameraViewport(props: CameraViewportProps): React.JSX.Element {
 
   return (
     <div className="nt-camera-frame">
-      <video
-        ref={props.videoRef}
-        className="nt-video"
-        playsInline
-        muted
-        style={{ transform: props.mirror ? 'scaleX(-1)' : 'none' }}
-      />
-      <canvas
-        ref={props.canvasRef}
-        className={props.cameraActive ? 'nt-canvas is-interactive' : 'nt-canvas'}
-        style={{ cursor: hoveredId !== null && props.cameraActive ? 'pointer' : 'default' }}
-        onMouseMove={(e) => {
-          const canvas = props.canvasRef.current
-          const video = props.videoRef.current
-          if (!props.cameraActive || !canvas || !video) {
+      <div className="nt-camera-media">
+        <video
+          ref={props.videoRef}
+          className="nt-video"
+          playsInline
+          muted
+          style={{ transform: props.mirror ? 'scaleX(-1)' : 'none' }}
+        />
+        <canvas
+          ref={props.canvasRef}
+          className={props.cameraActive ? 'nt-canvas is-interactive' : 'nt-canvas'}
+          style={{ cursor: hoveredId !== null && props.cameraActive ? 'pointer' : 'default' }}
+          onMouseMove={(e) => {
+            const canvas = props.canvasRef.current
+            const video = props.videoRef.current
+            if (!props.cameraActive || !canvas || !video) {
+              if (hoveredId !== null) setHoveredId(null)
+              return
+            }
+            const hit = CanvasOverlayRenderer.hitTest(
+              e.clientX,
+              e.clientY,
+              canvas,
+              video,
+              props.filterResult.kept,
+              props.mirror,
+            )
+            const nextId = hit ? hit.id : null
+            if (nextId !== hoveredId) setHoveredId(nextId)
+          }}
+          onMouseLeave={() => {
             if (hoveredId !== null) setHoveredId(null)
-            return
-          }
-          const hit = CanvasOverlayRenderer.hitTest(
-            e.clientX,
-            e.clientY,
-            canvas,
-            video,
-            props.filterResult.kept,
-            props.mirror,
-          )
-          const nextId = hit ? hit.id : null
-          if (nextId !== hoveredId) setHoveredId(nextId)
-        }}
-        onMouseLeave={() => {
-          if (hoveredId !== null) setHoveredId(null)
-        }}
-        onClick={(e) => {
-          const canvas = props.canvasRef.current
-          const video = props.videoRef.current
-          if (!props.cameraActive || !canvas || !video || !props.onSelectInstance) return
-          const hit = CanvasOverlayRenderer.hitTest(
-            e.clientX,
-            e.clientY,
-            canvas,
-            video,
-            props.filterResult.kept,
-            props.mirror,
-          )
-          if (hit !== null) {
-            props.onSelectInstance(hit)
-          }
-        }}
-      />
-      <div className="nt-camera-hud">
-        <span className="nt-hud-chip">{props.locale.translate('camera.title')}</span>
-        <span className="nt-hud-chip">{props.modelStatusBadge}</span>
-        {props.cameraActive && props.filterResult.kept.length > 0 ? (
-          <span className="nt-hud-chip">{props.locale.translate('camera.clickHint')}</span>
-        ) : null}
-        {props.cameraActive && props.resolution.w > 0 ? (
-          <span className="nt-hud-chip">
-            {props.locale.translate('camera.resolution', { w: props.resolution.w, h: props.resolution.h })}
-            {' · '}
-            {props.fps > 0 ? props.fps.toFixed(1) + ' FPS' : '-- FPS'}
-          </span>
+          }}
+          onClick={(e) => {
+            const canvas = props.canvasRef.current
+            const video = props.videoRef.current
+            if (!props.cameraActive || !canvas || !video || !props.onSelectInstance) return
+            const hit = CanvasOverlayRenderer.hitTest(
+              e.clientX,
+              e.clientY,
+              canvas,
+              video,
+              props.filterResult.kept,
+              props.mirror,
+            )
+            if (hit !== null) {
+              props.onSelectInstance(hit)
+            }
+          }}
+        />
+        {!props.cameraActive ? (
+          <div className="nt-camera-empty">
+            <div style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>
+              {props.locale.translate('camera.idleTitle')}
+            </div>
+            <div style={{ fontSize: '12.5px', maxWidth: '380px', lineHeight: 1.6 }}>
+              {props.locale.translate('camera.idleHint')}
+            </div>
+            {props.cameraError ? (
+              <div className="nt-banner is-error" style={{ maxWidth: '400px' }}>
+                {props.cameraError}
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
-      {!props.cameraActive ? (
-        <div className="nt-camera-empty">
-          <div style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>
-            {props.locale.translate('camera.idleTitle')}
-          </div>
-          <div style={{ fontSize: '12.5px', maxWidth: '380px', lineHeight: 1.6 }}>
-            {props.locale.translate('camera.idleHint')}
-          </div>
-          {props.cameraError ? (
-            <div className="nt-banner is-error" style={{ maxWidth: '400px' }}>
-              {props.cameraError}
-            </div>
+      <div className="nt-camera-hud">
+        <div className="nt-camera-hud-left">
+          <CameraScopeDropdown
+            collection={props.scopeCollection}
+            cameraActive={props.cameraActive}
+            locale={props.locale}
+            onAdd={props.onAddScope}
+            onSelect={props.onSelectScope}
+            onRename={props.onRenameScope}
+            onDelete={props.onDeleteScope}
+          />
+          <span className="nt-hud-chip">{props.locale.translate('camera.title')}</span>
+        </div>
+        <div className="nt-camera-hud-right">
+          <span className="nt-hud-chip">{props.modelStatusBadge}</span>
+          {props.cameraActive && props.filterResult.kept.length > 0 ? (
+            <span className="nt-hud-chip">{props.locale.translate('camera.clickHint')}</span>
+          ) : null}
+          {props.cameraActive && props.resolution.w > 0 ? (
+            <span className="nt-hud-chip">
+              {props.locale.translate('camera.resolution', { w: props.resolution.w, h: props.resolution.h })}
+              {' · '}
+              {props.fps > 0 ? props.fps.toFixed(1) + ' FPS' : '-- FPS'}
+            </span>
           ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
   )
 }

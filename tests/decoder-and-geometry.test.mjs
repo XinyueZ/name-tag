@@ -346,6 +346,167 @@ test('CutoutAugmenter.dilateBinaryMask expands foreground mask by 1px and Object
   assert.equal(seq, 2)
 })
 
+test('CameraScopeCollection includes immutable All & Human Face, supports continuous add, rename, delete, and PreferencesStore persistence', async () => {
+  const clientExports = await loadBuiltClientBundle()
+  const { CameraScopeCollection, CameraScopeItem, PreferencesStore } = clientExports
+  const zhLabels = { all: '所有', humanFace: '人脸' }
+  const enLabels = { all: 'All', humanFace: 'Human Face' }
+
+  const initial = CameraScopeCollection.createDefault()
+  assert.equal(initial.selectedId, CameraScopeItem.ALL_ID)
+  const initialItems = initial.getAllItems(zhLabels)
+  assert.equal(initialItems.length, 2)
+  assert.equal(initialItems[0].id, 'all')
+  assert.equal(initialItems[0].text, '所有')
+  assert.equal(initialItems[0].editable, false)
+  assert.equal(initialItems[0].isBuiltIn, true)
+  assert.equal(initialItems[1].id, 'human-face')
+  assert.equal(initialItems[1].text, '人脸')
+  assert.equal(initialItems[1].editable, false)
+  assert.equal(initialItems[1].isBuiltIn, true)
+
+  // Built-in 'all' and 'human-face' cannot be edited or deleted
+  assert.equal(initial.renameItem('all', 'Hacked', zhLabels).getSelectedItem(zhLabels).text, '所有')
+  assert.equal(initial.removeItem('all').getAllItems(zhLabels).length, 2)
+  assert.equal(initial.renameItem('human-face', 'OtherFace', zhLabels).getAllItems(zhLabels)[1].text, '人脸')
+  assert.equal(initial.removeItem('human-face').getAllItems(zhLabels).length, 2)
+  assert.equal(initialItems[0].withText('Other').text, '所有')
+  assert.equal(initialItems[1].withText('Other').text, '人脸')
+
+  // Selecting built-in Human Face works in both ZH and EN
+  const selectedFace = initial.selectItem(CameraScopeItem.HUMAN_FACE_ID)
+  assert.equal(selectedFace.selectedId, 'human-face')
+  assert.equal(selectedFace.getSelectedItem(zhLabels).text, '人脸')
+  assert.equal(selectedFace.getSelectedItem(enLabels).text, 'Human Face')
+
+  // Continuous additions grow list unboundedly while rejecting blank/duplicate/reserved
+  assert.equal(initial.addItem('   ', zhLabels).status, 'empty')
+  assert.equal(initial.addItem('所有', zhLabels).status, 'reserved-builtin')
+  assert.equal(initial.addItem('All', enLabels).status, 'reserved-builtin')
+  assert.equal(initial.addItem('人脸', zhLabels).status, 'reserved-builtin')
+  assert.equal(initial.addItem('human face', enLabels).status, 'reserved-builtin')
+
+  const r1 = initial.addItem('水杯', zhLabels)
+  assert.equal(r1.status, 'added')
+  assert.ok(r1.addedItem && r1.addedItem.editable === true)
+  const r2 = r1.collection.addItem('耳机', zhLabels)
+  assert.equal(r2.status, 'added')
+  const r3 = r2.collection.addItem('Keyboard', enLabels)
+  assert.equal(r3.status, 'added')
+  const dup = r3.collection.addItem('keyboard', enLabels)
+  assert.equal(dup.status, 'duplicate')
+  assert.equal(r3.collection.getAllItems(zhLabels).length, 5)
+  assert.equal(r3.collection.selectedId, 'all')
+
+  // Select, rename, and delete custom items (deleting active resets to 'all')
+  const cupId = r1.addedItem.id
+  const selected = r3.collection.selectItem(cupId)
+  assert.equal(selected.selectedId, cupId)
+  assert.equal(selected.getSelectedItem(zhLabels).text, '水杯')
+  const renamed = selected.renameItem(cupId, '保温杯', zhLabels)
+  assert.equal(renamed.getSelectedItem(zhLabels).text, '保温杯')
+  const afterDelete = renamed.removeItem(cupId)
+  assert.equal(afterDelete.selectedId, 'all')
+  assert.equal(afterDelete.getSelectedItem(zhLabels).text, '所有')
+  assert.equal(afterDelete.customItems.length, 2)
+
+  // Persistence sanitization via PreferencesStore
+  const sanitized = PreferencesStore.sanitizePreferences({
+    granularity: {
+      preset: 'coarse',
+      comprehensive: 25,
+      containmentThreshold: 0.7,
+      minAreaPercent: 2.0,
+      confThreshold: 0.45,
+      showSuppressed: false,
+    },
+    cameraScopes: {
+      selectedId: 'human-face',
+      customItems: [
+        { id: 'all', text: 'FakeAll', editable: true },
+        { id: 'human-face', text: 'FakeFace', editable: true },
+        { id: r2.addedItem.id, text: '耳机', editable: true },
+        { id: 'blank', text: '   ', editable: true },
+        { id: 'res1', text: 'all', editable: true },
+        { id: 'res2', text: 'Human Face', editable: true },
+      ],
+    },
+  })
+  assert.equal(sanitized.cameraScopes.selectedId, 'human-face')
+  assert.equal(sanitized.cameraScopes.customItems.length, 1)
+  assert.equal(sanitized.cameraScopes.customItems[0].text, '耳机')
+})
+
+test('CameraTipsScheduler shows for 5s on camera start and repeats every 60s until stopped', async () => {
+  const clientExports = await loadBuiltClientBundle()
+  const { CameraTipsScheduler } = clientExports
+  assert.equal(CameraTipsScheduler.VISIBLE_DURATION_MS, 5000)
+  assert.equal(CameraTipsScheduler.REPEAT_INTERVAL_MS, 60000)
+
+  let nextHandle = 1
+  const timeouts = new Map()
+  const intervals = new Map()
+  const events = []
+
+  const fakeTimers = {
+    setTimeout(cb, ms) {
+      const id = nextHandle++
+      timeouts.set(id, { cb, ms })
+      return id
+    },
+    clearTimeout(id) {
+      timeouts.delete(id)
+    },
+    setInterval(cb, ms) {
+      const id = nextHandle++
+      intervals.set(id, { cb, ms })
+      return id
+    },
+    clearInterval(id) {
+      intervals.delete(id)
+    },
+  }
+
+  const scheduler = new CameraTipsScheduler((visible) => events.push(visible), fakeTimers)
+  scheduler.start()
+  assert.deepEqual(events, [true])
+  assert.equal(timeouts.size, 1)
+  assert.equal(intervals.size, 1)
+  assert.equal([...timeouts.values()][0].ms, 5000)
+  assert.equal([...intervals.values()][0].ms, 60000)
+
+  // Fire 5s hide timer
+  const firstHide = [...timeouts.entries()][0]
+  timeouts.delete(firstHide[0])
+  firstHide[1].cb()
+  assert.deepEqual(events, [true, false])
+
+  // Fire 60s repeat tick -> shows again and schedules another 5s hide timer
+  const repeatEntry = [...intervals.values()][0]
+  repeatEntry.cb()
+  assert.deepEqual(events, [true, false, true])
+  assert.equal(timeouts.size, 1)
+  const secondHide = [...timeouts.entries()][0]
+  timeouts.delete(secondHide[0])
+  secondHide[1].cb()
+  assert.deepEqual(events, [true, false, true, false])
+
+  // Stop clears all timers and hides immediately
+  scheduler.stop()
+  assert.equal(timeouts.size, 0)
+  assert.equal(intervals.size, 0)
+  assert.equal(events[events.length - 1], false)
+
+  // Restarting camera immediately pops tips again
+  scheduler.start()
+  assert.equal(events[events.length - 1], true)
+  assert.equal(timeouts.size, 1)
+  assert.equal(intervals.size, 1)
+  scheduler.dispose()
+  assert.equal(timeouts.size, 0)
+  assert.equal(intervals.size, 0)
+})
+
 test('SplitPaneGeometry clamps split ratio within [26, 74]', async () => {
   const clientExports = await loadBuiltClientBundle()
   const { SplitPaneGeometry } = clientExports

@@ -1,10 +1,12 @@
-import { type GranularityParams, type NameTagPreferences, type SavedGranularityPreset } from '../../invariant'
+import { type CameraScopeStateData, type GranularityParams, type NameTagPreferences, type SavedGranularityPreset } from '../../invariant'
+import { CameraScopeCollection } from './CameraScopeModels'
 import { GranularitySettings, SavedPresetItem } from './SavedPresetModels'
 
 export interface LoadedWorkspacePreferences {
   readonly granularity: GranularityParams
   readonly granularityCardCollapsed: boolean
   readonly savedPresets: SavedPresetItem[]
+  readonly cameraScopes: CameraScopeCollection
 }
 
 /**
@@ -28,16 +30,22 @@ export class PreferencesStore {
     return result
   }
 
+  public static sanitizeCameraScopes(raw: unknown): CameraScopeStateData {
+    return CameraScopeCollection.fromRaw(raw).toJSON()
+  }
+
   public static sanitizePreferences(raw: unknown): NameTagPreferences | null {
     if (raw === null || typeof raw !== 'object') return null
     const obj = raw as Record<string, unknown>
     const granularity = PreferencesStore.sanitizeGranularity(obj.granularity)
     if (granularity === null) return null
     const items = PreferencesStore.sanitizeSavedPresets(obj.savedPresets)
+    const cameraScopes = PreferencesStore.sanitizeCameraScopes(obj.cameraScopes)
     return {
       granularity,
       granularityCardCollapsed: Boolean(obj.granularityCardCollapsed),
       savedPresets: items.map((item) => item.toJSON()),
+      cameraScopes,
     }
   }
 
@@ -47,6 +55,7 @@ export class PreferencesStore {
       granularity: raw.granularity,
       granularityCardCollapsed: Boolean(raw.granularityCardCollapsed),
       savedPresets: PreferencesStore.sanitizeSavedPresets(raw.savedPresets),
+      cameraScopes: CameraScopeCollection.fromRaw(raw.cameraScopes),
     }
   }
 
@@ -75,11 +84,13 @@ export class PreferencesStore {
     readonly granularity: GranularityParams
     readonly granularityCardCollapsed: boolean
     readonly savedPresets: readonly SavedPresetItem[]
+    readonly cameraScopes?: CameraScopeCollection
   }): void {
     const payload: NameTagPreferences = {
       granularity: state.granularity,
       granularityCardCollapsed: state.granularityCardCollapsed,
       savedPresets: state.savedPresets.map((item): SavedGranularityPreset => item.toJSON()),
+      cameraScopes: (state.cameraScopes ?? CameraScopeCollection.createDefault()).toJSON(),
     }
     this.saveLocal(payload)
   }

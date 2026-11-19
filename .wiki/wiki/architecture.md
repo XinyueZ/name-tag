@@ -24,7 +24,9 @@ All runtime logic is encapsulated in single-responsibility classes under `src/cl
 - `FastSamInferenceEngine` (`src/client/core/FastSamInferenceEngine.ts`): `onnxruntime-web` WebGPU/WASM session, RGB letterbox preprocessor, and YOLOv8-seg tensor decoder.
 - `CameraController` (`src/client/core/CameraController.ts`): `navigator.mediaDevices.getUserMedia` lifecycle, device enumeration, and stream switching.
 - `SavedPresetModels` (`src/client/core/SavedPresetModels.ts`): OOP domain classes `SavedPresetItem` (`id`, `text`, `selected`, `settings`) and `GranularitySettings`.
-- `PreferencesStore` (`src/client/core/PreferencesStore.ts`): 100% browser-local persistence (`localStorage`) for Granularity panel state, card collapse, and `SavedPresetItem` list.
+- `CameraScopeModels` (`src/client/core/CameraScopeModels.ts`): Immutable OOP domain classes `CameraScopeItem` (with protected built-in `ALL_ID = 'all'` and `HUMAN_FACE_ID = 'human-face'`) and `CameraScopeCollection` managing unbounded user-added camera dropdown entries, selection, inline renames, and safe deletion.
+- `CameraTipsScheduler` (`src/client/core/CameraTipsScheduler.ts`): OOP timer coordinator driving the non-dismissible floating Tips bubble (5s visible burst on every camera start, repeating every 60s until camera stop).
+- `PreferencesStore` (`src/client/core/PreferencesStore.ts`): 100% browser-local persistence (`localStorage`) for Granularity panel state, card collapse, `SavedPresetItem` list, and `CameraScopeCollection` state.
 - `Gemma2EmbeddingEngine` & `Gemma2LangChainEmbeddings` (`src/client/core/Gemma2EmbeddingEngine.ts`): Client-side EmbeddingGemma 2 (`onnx-community/embeddinggemma-2-ONNX`) encoder & LangChain `Embeddings` subclass.
 - `IndexedDbLangChainVectorStore` & `BrowserTargetVectorRepository` (`src/client/core/BrowserVectorStore.ts`): 100% browser-local LangChain `VectorStore` persisted in Browser IndexedDB (`dsh-name-tag-vectors`), storing 6-vector target indices + metadata with zero server state.
 - `VectorTableFormatter` (`src/client/core/VectorTableFormatter.ts`) & `VectorDbModal` (`src/client/components/VectorDbModal.tsx`): 5-column database inspector (`index`, `augmentation`, `title`, `description`, `timestamp`) with 5-head/5-tail vector formatting and resizable `title`/`description` columns.
@@ -34,7 +36,8 @@ All runtime logic is encapsulated in single-responsibility classes under `src/cl
 ## 3. Atomic UI Component Hierarchy
 
 - `NameTagWorkspace`: Top-level split-screen shell with `data-conversation-composer-overlay=""`.
-- `CameraViewport`: Video stream + synchronized `<canvas>` bounding-box overlay + lazy-load status overlay.
+- `CameraViewport`: Video stream + synchronized `<canvas>` segmentation overlay + top-left HUD hosting `CameraScopeDropdown` + lazy-load status overlay.
+- `CameraScopeDropdown`: Atomic editable dropdown at the top-left of the camera viewport with immutable built-in “所有” (All) & “人脸” (Human Face), continuous Enter-to-add input (IME-safe), inline rename for custom entries, per-item `×` deletion, and a non-dismissible floating Tips bubble driven by `CameraTipsScheduler`.
 - `SplitPaneDivider`: Interactive draggable split handle ("把手") with pointer capture & double-click 50/50 reset.
 - `CameraControlStrip`: Camera start/stop, device selector, model cache/lazy-load status strip.
 - `GranularityCard`: Material Design 3 card implementing **“颗粒度”实时调控面板**.

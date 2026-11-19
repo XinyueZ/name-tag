@@ -29,6 +29,20 @@ export class TranslationCatalog {
     'camera.resolution': '{w}×{h}',
     'camera.clickHint': '点击任意分割块可打开「目标标记」',
 
+    // Camera Scope Editable Dropdown
+    'scope.all': '所有',
+    'scope.humanFace': '人脸',
+    'scope.dropdownAria': '镜头类别筛选下拉框',
+    'scope.inputPlaceholder': '输入内容并按回车添加...',
+    'scope.addBtnTitle': '添加到下拉列表 (Enter)',
+    'scope.editItemTitle': '编辑此项',
+    'scope.deleteItemTitle': '删除此项',
+    'scope.lockedHint': '默认项，不可编辑或删除',
+    'scope.duplicateHint': '该选项已存在',
+    'scope.reservedBuiltInHint': '该项为默认内置固定项',
+    'scope.tipsBadge': 'Tips',
+    'scope.tipsText': '可切换「所有 / 人脸」或输入自定义项按回车添加',
+
     // FastSAM-s & EmbeddingGemma 2 Models & Storage
     'model.label': 'FastSAM-s 模型',
     'model.idle': '未加载（按需懒加载）',
@@ -169,6 +183,20 @@ export class TranslationCatalog {
     'camera.permissionDenied': 'Camera access failed: {message}',
     'camera.resolution': '{w}×{h}',
     'camera.clickHint': 'Click any segment to open Target Tagging',
+
+    // Camera Scope Editable Dropdown
+    'scope.all': 'All',
+    'scope.humanFace': 'Human Face',
+    'scope.dropdownAria': 'Camera scope filter dropdown',
+    'scope.inputPlaceholder': 'Type item and press Enter...',
+    'scope.addBtnTitle': 'Add to dropdown list (Enter)',
+    'scope.editItemTitle': 'Edit item',
+    'scope.deleteItemTitle': 'Delete item',
+    'scope.lockedHint': 'Built-in default (cannot edit or delete)',
+    'scope.duplicateHint': 'Item already exists',
+    'scope.reservedBuiltInHint': 'This is a built-in default item',
+    'scope.tipsBadge': 'Tips',
+    'scope.tipsText': 'Switch "All / Human Face" or type & press Enter to add',
 
     // FastSAM-s & EmbeddingGemma 2 Models & Storage
     'model.label': 'FastSAM-s Model',
