@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DEFAULT_MATCH_THRESHOLD, DEFAULT_SCOPE_CONFIDENCE_THRESHOLD, type BoundingBox, type GranularityFilterResult, type GranularityParams, type ModelStatusResponse, type RecognizedDetection, type VectorTableRow } from '../../invariant'
+import { DEFAULT_MATCH_THRESHOLD, DEFAULT_MATCH_TOP_K, DEFAULT_RECOGNITION_IOU_THRESHOLD, DEFAULT_SCOPE_CONFIDENCE_THRESHOLD, type BoundingBox, type GranularityFilterResult, type GranularityParams, type ModelStatusResponse, type RecognizedDetection, type VectorTableRow } from '../../invariant'
 import { CameraController, type CameraDeviceOption } from '../core/CameraController'
 import { CutoutAugmenter, type CutoutPreviewItem } from '../core/CutoutAugmenter'
 import { FastSamInferenceEngine, type ExecutionProviderKind } from '../core/FastSamInferenceEngine'
@@ -124,6 +124,12 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const [matchThreshold, setMatchThreshold] = useState<number>(() => {
     return prefStoreRef.current?.loadLocal()?.matchThreshold ?? DEFAULT_MATCH_THRESHOLD
   })
+  const [recognitionIouThreshold, setRecognitionIouThreshold] = useState<number>(() => {
+    return prefStoreRef.current?.loadLocal()?.recognitionIouThreshold ?? DEFAULT_RECOGNITION_IOU_THRESHOLD
+  })
+  const [matchTopK, setMatchTopK] = useState<number>(() => {
+    return prefStoreRef.current?.loadLocal()?.matchTopK ?? DEFAULT_MATCH_TOP_K
+  })
   const [pocketItems, setPocketItems] = useState<readonly PocketItem[]>([])
   const [pocketOpen, setPocketOpen] = useState<boolean>(false)
   const [matchError, setMatchError] = useState<string | null>(null)
@@ -132,6 +138,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const keptRef = useRef<readonly BoundingBox[]>([])
   const scopeConfidenceThresholdRef = useRef<number>(scopeConfidenceThreshold)
   const matchThresholdRef = useRef<number>(matchThreshold)
+  const matchTopKRef = useRef<number>(matchTopK)
 
   const locale = useMemo(() => new LocaleService(props.t), [props.t])
 
@@ -270,6 +277,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const handleClearCache = useCallback(async () => {
     trackerRef.current?.reset()
     semanticFilterRef.current?.reset(null)
+    semanticFilterRef.current?.clearPostRecognitionCache()
     negativeTextVecsRef.current = null
     setScopeProtoReady(false)
     setRecognizedDetections([])
@@ -295,6 +303,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     setGranularity(GranularityFilter.fromPreset('coarse', false))
     setGranularityCollapsed(false)
     setMatchThreshold(DEFAULT_MATCH_THRESHOLD)
+    setRecognitionIouThreshold(DEFAULT_RECOGNITION_IOU_THRESHOLD)
+    setMatchTopK(DEFAULT_MATCH_TOP_K)
     setPocketItems([])
     setPocketOpen(false)
     setMatchError(null)
@@ -480,10 +490,14 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
           }
         }
         if (cancelled) return
+        const effectiveNegIndices = SemanticScopeFilter.getEffectiveNegativeIndices(selectedScope.text)
+        const effectiveNegVecs = effectiveNegIndices
+          .map((idx) => negVecs[idx])
+          .filter((v): v is readonly number[] => Array.isArray(v) && v.length > 0)
         semanticFilter.setPrototype({
           scopeKey: activeScopeKey,
           positiveTextCentroid,
-          negativeTextVectors: negVecs,
+          negativeTextVectors: effectiveNegVecs,
           visualCentroid,
         })
         setScopeProtoReady(true)
@@ -507,6 +521,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   granularityKeptRef.current = granularityResult.kept
   scopeConfidenceThresholdRef.current = scopeConfidenceThreshold
   matchThresholdRef.current = matchThreshold
+  matchTopKRef.current = matchTopK
 
   // Layer 2 (Top): Update SemanticScopeFilter track state on every FastSAM-s frame when non-'All'
   useEffect(() => {
@@ -583,27 +598,45 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
                 const searchRes = await vectorRepo.searchMatches(
                   passedForPocket.map((p) => p.vector),
                   matchThresholdRef.current,
+                  matchTopKRef.current,
                 )
                 if (!cancelled) {
                   setMatchError(null)
                   const matchedItems: PocketItem[] = []
+                  const embedEngine = embedEngineRef.current
                   for (let i = 0; i < searchRes.results.length; i += 1) {
                     const hit = searchRes.results[i]
                     const entry = passedForPocket[hit.index]
                     if (!entry) continue
-                    const resolvedTitle = typeof hit.title === 'string' ? hit.title.trim() : ''
-                    const isHit = hit.matched && hit.targetId !== null && resolvedTitle.length > 0
+                    const candidates = hit.candidates ?? []
+                    const chosen =
+                      candidates.length > 0 && embedEngine && embedEngine.isReady()
+                        ? await semanticFilter.selectScopedMatch(
+                            candidates,
+                            selectedScope.id,
+                            selectedScope.text,
+                            scopeConfidenceThresholdRef.current,
+                            (txt) => embedEngine.embedText(txt),
+                            async (tid) => {
+                              const vecs = await vectorRepo.getVectorsByTargetId(tid)
+                              return SemanticScopeFilter.computeCentroid(vecs)
+                            },
+                          )
+                        : null
+                    if (cancelled) return
+                    const isHit = chosen !== null
                     semanticFilter.applyPocketMatchResult(
                       entry.track.trackId,
                       isHit,
-                      isHit ? hit.targetId : null,
-                      isHit ? resolvedTitle : null,
+                      chosen?.targetId ?? null,
+                      chosen?.title ?? null,
                       nowTs,
+                      chosen?.similarity ?? 0,
                     )
-                    if (isHit) {
+                    if (chosen !== null) {
                       matchedItems.push({
-                        targetId: hit.targetId as string,
-                        title: resolvedTitle,
+                        targetId: chosen.targetId,
+                        title: chosen.title,
                         dataUrl: entry.track.rawPocketUrl,
                         capturedAt: nowTs,
                       })
@@ -645,7 +678,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
       cancelled = true
       if (timerId !== null) window.clearTimeout(timerId)
     }
-  }, [activeScopeKey, cameraActive, dbModalOpen, embedPhase, modelPhase, scopeProtoReady, tagModalItems, vectorStats.totalVectors])
+  }, [activeScopeKey, cameraActive, dbModalOpen, embedPhase, modelPhase, scopeProtoReady, selectedScope.id, selectedScope.text, tagModalItems, vectorStats.totalVectors])
 
   const effectiveFilterResult: GranularityFilterResult = useMemo(() => {
     if (selectedScope.isAll) {
@@ -664,10 +697,10 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
 
   keptRef.current = effectiveFilterResult.kept
 
-  const trackedRecognizedDetections = useMemo(
-    () => PocketCaptureManager.trackRecognizedBoxes(recognizedDetections, effectiveFilterResult.kept),
-    [recognizedDetections, effectiveFilterResult.kept],
-  )
+  const trackedRecognizedDetections = useMemo(() => {
+    const snapped = PocketCaptureManager.trackRecognizedBoxes(recognizedDetections, effectiveFilterResult.kept)
+    return PocketCaptureManager.suppressOverlappingDetections(snapped, recognitionIouThreshold)
+  }, [recognizedDetections, effectiveFilterResult.kept, recognitionIouThreshold])
 
   // 'All' mode: 100% original ObjectCropTracker flow
   useEffect(() => {
@@ -742,6 +775,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
                     isHit ? hit.targetId : null,
                     isHit ? resolvedTitle : null,
                     nowTs,
+                    isHit ? hit.similarity : 0,
                   )
                   if (isHit) {
                     matchedItems.push({
@@ -855,6 +889,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
 
   const handleClearVectorDb = useCallback(async (): Promise<void> => {
     trackerRef.current?.reset()
+    semanticFilterRef.current?.clearPostRecognitionCache()
     await vectorRepoRef.current?.clearAll()
     setVectorStats({ totalTargets: 0, totalVectors: 0 })
     setDbRows([])
@@ -898,6 +933,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     readonly cameraScopes?: CameraScopeCollection
     readonly scopeConfidenceThreshold?: number
     readonly matchThreshold?: number
+    readonly recognitionIouThreshold?: number
+    readonly matchTopK?: number
   }) => {
     prefStoreRef.current?.saveWorkspace({
       granularity: overrides.granularity ?? granularity,
@@ -906,8 +943,10 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
       cameraScopes: overrides.cameraScopes ?? scopeCollection,
       scopeConfidenceThreshold: overrides.scopeConfidenceThreshold ?? scopeConfidenceThreshold,
       matchThreshold: overrides.matchThreshold ?? matchThreshold,
+      recognitionIouThreshold: overrides.recognitionIouThreshold ?? recognitionIouThreshold,
+      matchTopK: overrides.matchTopK ?? matchTopK,
     })
-  }, [granularity, granularityCollapsed, matchThreshold, savedPresets, scopeCollection, scopeConfidenceThreshold])
+  }, [granularity, granularityCollapsed, matchThreshold, matchTopK, recognitionIouThreshold, savedPresets, scopeCollection, scopeConfidenceThreshold])
 
   const handleAddScope = useCallback((text: string): CameraScopeAddStatus => {
     const labels = {
@@ -952,6 +991,17 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const handleMatchThresholdChange = useCallback((nextVal: number) => {
     setMatchThreshold(nextVal)
     persistWorkspace({ matchThreshold: nextVal })
+  }, [persistWorkspace])
+
+  const handleRecognitionIouThresholdChange = useCallback((nextVal: number) => {
+    setRecognitionIouThreshold(nextVal)
+    persistWorkspace({ recognitionIouThreshold: nextVal })
+  }, [persistWorkspace])
+
+  const handleMatchTopKChange = useCallback((nextVal: number) => {
+    const rounded = Math.round(nextVal)
+    setMatchTopK(rounded)
+    persistWorkspace({ matchTopK: rounded })
   }, [persistWorkspace])
 
   const fullscreenBtnLabel = locale.translate(
@@ -1056,9 +1106,13 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
             hostStorageStatus={hostStorageStatus}
             vectorStats={vectorStats}
             matchThreshold={matchThreshold}
+            recognitionIouThreshold={recognitionIouThreshold}
+            matchTopK={matchTopK}
             matchError={matchError}
             onOpenPocket={() => setPocketOpen(true)}
             onMatchThresholdChange={handleMatchThresholdChange}
+            onRecognitionIouThresholdChange={handleRecognitionIouThresholdChange}
+            onMatchTopKChange={handleMatchTopKChange}
             locale={locale}
             onToggleCamera={handleToggleCamera}
             onToggleMirror={() => setMirror((m) => !m)}

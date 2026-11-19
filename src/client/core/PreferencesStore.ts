@@ -1,6 +1,10 @@
 import {
   DEFAULT_MATCH_THRESHOLD,
+  DEFAULT_MATCH_TOP_K,
+  DEFAULT_RECOGNITION_IOU_THRESHOLD,
   DEFAULT_SCOPE_CONFIDENCE_THRESHOLD,
+  MAX_MATCH_TOP_K,
+  MIN_MATCH_TOP_K,
   type CameraScopeStateData,
   type GranularityParams,
   type NameTagPreferences,
@@ -17,6 +21,8 @@ export interface LoadedWorkspacePreferences {
   readonly cameraScopes: CameraScopeCollection
   readonly scopeConfidenceThreshold: number
   readonly matchThreshold: number
+  readonly recognitionIouThreshold: number
+  readonly matchTopK: number
 }
 
 /**
@@ -30,6 +36,11 @@ export class PreferencesStore {
   public static sanitizeUnitThreshold(raw: unknown, fallback: number): number {
     if (typeof raw !== 'number' || !Number.isFinite(raw)) return fallback
     return Number(GranularityFilter.clamp(raw, 0, 1).toFixed(2))
+  }
+
+  public static sanitizeTopK(raw: unknown, fallback = DEFAULT_MATCH_TOP_K): number {
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return fallback
+    return Math.round(GranularityFilter.clamp(raw, MIN_MATCH_TOP_K, MAX_MATCH_TOP_K))
   }
 
   public static sanitizeGranularity(raw: unknown): GranularityParams | null {
@@ -65,6 +76,11 @@ export class PreferencesStore {
       obj.matchThreshold,
       DEFAULT_MATCH_THRESHOLD,
     )
+    const recognitionIouThreshold = PreferencesStore.sanitizeUnitThreshold(
+      obj.recognitionIouThreshold,
+      DEFAULT_RECOGNITION_IOU_THRESHOLD,
+    )
+    const matchTopK = PreferencesStore.sanitizeTopK(obj.matchTopK, DEFAULT_MATCH_TOP_K)
     return {
       granularity,
       granularityCardCollapsed: Boolean(obj.granularityCardCollapsed),
@@ -72,6 +88,8 @@ export class PreferencesStore {
       cameraScopes,
       scopeConfidenceThreshold,
       matchThreshold,
+      recognitionIouThreshold,
+      matchTopK,
     }
   }
 
@@ -90,6 +108,11 @@ export class PreferencesStore {
         raw.matchThreshold,
         DEFAULT_MATCH_THRESHOLD,
       ),
+      recognitionIouThreshold: PreferencesStore.sanitizeUnitThreshold(
+        raw.recognitionIouThreshold,
+        DEFAULT_RECOGNITION_IOU_THRESHOLD,
+      ),
+      matchTopK: PreferencesStore.sanitizeTopK(raw.matchTopK, DEFAULT_MATCH_TOP_K),
     }
   }
 
@@ -121,6 +144,8 @@ export class PreferencesStore {
     readonly cameraScopes?: CameraScopeCollection
     readonly scopeConfidenceThreshold?: number
     readonly matchThreshold?: number
+    readonly recognitionIouThreshold?: number
+    readonly matchTopK?: number
   }): void {
     const payload: NameTagPreferences = {
       granularity: state.granularity,
@@ -135,6 +160,11 @@ export class PreferencesStore {
         state.matchThreshold,
         DEFAULT_MATCH_THRESHOLD,
       ),
+      recognitionIouThreshold: PreferencesStore.sanitizeUnitThreshold(
+        state.recognitionIouThreshold,
+        DEFAULT_RECOGNITION_IOU_THRESHOLD,
+      ),
+      matchTopK: PreferencesStore.sanitizeTopK(state.matchTopK, DEFAULT_MATCH_TOP_K),
     }
     this.saveLocal(payload)
   }

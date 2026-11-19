@@ -21,6 +21,9 @@ Content catalog for the **`name-tag`** DSH Web plugin project. Read this index f
 - [011-human-face-scope-and-tips-bubble.md](./raw/011-human-face-scope-and-tips-bubble.md) — Built-in immutable “人脸” (Human Face) option and non-dismissible 5s/60s floating Tips bubble on camera start.
 - [012-valen-bbox-semantic-filter-layer.md](./raw/012-valen-bbox-semantic-filter-layer.md) — (Superseded) Initial Valen-Decision-1.5 `bbox` filtering experiment, dropdown confidence slider, and persisted thresholds.
 - [013-embeddinggemma2-realtime-scope-filter.md](./raw/013-embeddinggemma2-realtime-scope-filter.md) — Real-time `EmbeddingGemma 2` contrastive Vision+Text semantic scope filter with few-shot visual fusion and one-vector-two-uses Pocket pipeline.
+- [014-recognition-iou-nms-slider.md](./raw/014-recognition-iou-nms-slider.md) — Recognition Dedup IoU slider below Capture Match Similarity and tighter-inner-box-first NMS to suppress enclosing background boxes.
+- [015-post-recognition-semantic-gate.md](./raw/015-post-recognition-semantic-gate.md) — Post-recognition literal + cross-lingual semantic gate on recognized DB `{ title, description }` and Layer 1 negative-prompt conflict guard.
+- [016-topk-competitive-margin-slider.md](./raw/016-topk-competitive-margin-slider.md) — Top-K distinct target vector search (`default Top 5`, persisted slider in Card 1) + `0.08` competitive margin selector solving Top-1 shadowing.
 
 ## Wiki Pages (Maintained)
 - [architecture.md](./wiki/architecture.md) — Dual-face DSH plugin structure, OOP classes, and atomic component hierarchy.

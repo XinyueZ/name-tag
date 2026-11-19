@@ -269,6 +269,25 @@ test('PocketCaptureManager deduplicates by targetId and clamps floating window p
   assert.equal(tracked[0].title, 'Xinyue')
   assert.equal(tracked[0].x1, 105)
   assert.equal(PocketCaptureManager.trackRecognizedBoxes(tracked, []).length, 0)
+
+  // Same-target enclosing outer background box vs smaller inner subject: max(IoU, IoM) suppresses outer box even at high threshold (e.g. 0.50) & far camera distance
+  const outerPapa = { targetId: 't-papa', title: 'papa', x1: 0, y1: 0, x2: 1000, y2: 700, colorIndex: 0, recognizedAt: 1000 }
+  const smallInnerPapa = { targetId: 't-papa', title: 'papa', x1: 350, y1: 220, x2: 650, y2: 520, colorIndex: 1, recognizedAt: 1001 }
+  const dedupAt050 = PocketCaptureManager.suppressOverlappingDetections([outerPapa, smallInnerPapa], 0.50)
+  assert.equal(dedupAt050.length, 1)
+  assert.equal(dedupAt050[0].x1, 350)
+  // Different target (mug held inside papa) uses standard IoU so both remain visible
+  const mugInFront = { targetId: 't-mug', title: 'mug', x1: 420, y1: 320, x2: 520, y2: 440, colorIndex: 2, recognizedAt: 1002 }
+  const keepDistinct = PocketCaptureManager.suppressOverlappingDetections([smallInnerPapa, mugInFront], 0.30)
+  assert.equal(keepDistinct.length, 2)
+  // Touching sibling same-target boxes (e.g. forehead touching glasses rim): higher similarity wins
+  const foreheadGlass = { targetId: 't-glass', title: 'glass', x1: 100, y1: 100, x2: 300, y2: 205, colorIndex: 0, recognizedAt: 1000, similarity: 0.79 }
+  const realGlass = { targetId: 't-glass', title: 'glass', x1: 100, y1: 185, x2: 305, y2: 255, colorIndex: 1, recognizedAt: 1001, similarity: 0.93 }
+  const bestSibling = PocketCaptureManager.suppressOverlappingDetections([foreheadGlass, realGlass], 0.25)
+  assert.equal(bestSibling.length, 1)
+  assert.equal(bestSibling[0].y1, 185)
+  // Threshold 1.00 disables suppression completely
+  assert.equal(PocketCaptureManager.suppressOverlappingDetections([outerPapa, smallInnerPapa], 1.0).length, 2)
 })
 
 test('BrowserTargetVectorRepository stores 6 vectors via LangChain VectorStore, searches by cosine similarity, and clears cleanly', async () => {
@@ -437,8 +456,10 @@ test('CameraScopeCollection includes immutable All & Human Face, supports contin
   assert.equal(sanitized.cameraScopes.customItems[0].text, '耳机')
   assert.equal(sanitized.scopeConfidenceThreshold, 0.5)
   assert.equal(sanitized.matchThreshold, 0.78)
+  assert.equal(sanitized.recognitionIouThreshold, 0.3)
+  assert.equal(sanitized.matchTopK, 30)
 
-  // Distinct scopeConfidenceThreshold & matchThreshold both sanitize and persist independently
+  // Distinct thresholds & Top-K sanitize and persist independently
   const withThresholds = PreferencesStore.sanitizePreferences({
     granularity: {
       preset: 'coarse',
@@ -450,9 +471,15 @@ test('CameraScopeCollection includes immutable All & Human Face, supports contin
     },
     scopeConfidenceThreshold: 0.64,
     matchThreshold: 0.85,
+    recognitionIouThreshold: 0.42,
+    matchTopK: 8,
   })
   assert.equal(withThresholds.scopeConfidenceThreshold, 0.64)
   assert.equal(withThresholds.matchThreshold, 0.85)
+  assert.equal(withThresholds.recognitionIouThreshold, 0.42)
+  assert.equal(withThresholds.matchTopK, 8)
+  assert.equal(PreferencesStore.sanitizeTopK(999), 500)
+  assert.equal(PreferencesStore.sanitizeTopK(0), 1)
   const clampedThresholds = PreferencesStore.sanitizePreferences({
     granularity: {
       preset: 'coarse',
@@ -526,6 +553,79 @@ test('SemanticScopeFilter scores contrastive text+visual prototypes, supports mu
   const f2Moved = { ...face2, id: 'f2-next', x1: 328, y1: 115, x2: 478, y2: 265 }
   filter.updateFrame(null, [f1Moved, f2Moved, cup], 1000, 1000, 10_150, () => 55, cropper)
   assert.deepEqual(Array.from(filter.getFilteredBoxes([f1Moved, f2Moved, cup], 0.5), (b) => b.id).sort(), ['f1-next', 'f2-next'])
+
+  // Negative-prompt conflict guard: searching for 'wall' or '墙壁' drops background-wall negative prompt
+  assert.equal(SemanticScopeFilter.getEffectiveNegativeIndices('glass').length, 4)
+  assert.equal(SemanticScopeFilter.getEffectiveNegativeIndices('墙壁').includes(0), false)
+  assert.equal(SemanticScopeFilter.getEffectiveNegativeIndices('desk').includes(1), false)
+
+  // Post-Recognition Semantic Gate: filtering for '眼镜' allows literal 'glass'->'glass' and cross-lingual 'glass'<->'眼镜' while blocking 'papa'
+  const glassFilter = new SemanticScopeFilter()
+  glassFilter.reset('custom-1:眼镜')
+  glassFilter.setPrototype({
+    scopeKey: 'custom-1:眼镜',
+    positiveTextCentroid: [1, 0, 0],
+    negativeTextVectors: [[0, 1, 0]],
+    visualCentroid: null,
+  })
+  let embedCalls = 0
+  const fakeEmbedText = async (txt) => {
+    embedCalls += 1
+    if (txt.includes('human person')) return [0, 0, 1]
+    if (txt.toLowerCase().includes('glass')) return [0.92, 0.05, 0.05]
+    return [0.1, 0.1, 0.95] // papa -> person space
+  }
+  assert.equal(await glassFilter.verifyRecognizedTarget('t-g', '眼镜', '黑框', 'custom-1', '眼镜', 0.5, fakeEmbedText), true)
+  assert.equal(embedCalls, 0) // literal match needs zero embeddings
+  assert.equal(await glassFilter.verifyRecognizedTarget('t-en', 'glass', 'black frame', 'custom-1', '眼镜', 0.5, fakeEmbedText), true)
+  assert.equal(await glassFilter.verifyRecognizedTarget('t-papa', 'papa', 'dad', 'custom-1', '眼镜', 0.5, fakeEmbedText), false)
+  const callsBeforeCacheHit = embedCalls
+  assert.equal(await glassFilter.verifyRecognizedTarget('t-papa', 'papa', 'dad', 'custom-1', '眼镜', 0.5, fakeEmbedText), false)
+  assert.equal(embedCalls, callsBeforeCacheHit) // cached per targetId
+
+  // Top-K competitive-margin selection: when filtering for 'papa', papa (0.82) wins behind glass (0.84)
+  const papaFilter = new SemanticScopeFilter()
+  papaFilter.reset('custom-2:papa')
+  papaFilter.setPrototype({
+    scopeKey: 'custom-2:papa',
+    positiveTextCentroid: [0, 0, 1],
+    negativeTextVectors: [[0, 1, 0]],
+    visualCentroid: null,
+  })
+  const faceCandidates = [
+    { targetId: 't-en', title: 'glass', description: 'black frame', similarity: 0.84 },
+    { targetId: 't-papa', title: 'papa', description: 'dad', similarity: 0.82 },
+  ]
+  const pickedPapa = await papaFilter.selectScopedMatch(faceCandidates, 'custom-2', 'papa', 0.5, fakeEmbedText)
+  assert.ok(pickedPapa && pickedPapa.targetId === 't-papa')
+
+  // Pure glasses cutout (glass 0.94 vs papa 0.79 -> gap 0.15 > 0.08) is rejected so glasses aren't mislabeled papa
+  const pureGlassCandidates = [
+    { targetId: 't-en', title: 'glass', description: 'black frame', similarity: 0.94 },
+    { targetId: 't-papa', title: 'papa', description: 'dad', similarity: 0.79 },
+  ]
+  const rejectedGlass = await papaFilter.selectScopedMatch(pureGlassCandidates, 'custom-2', 'papa', 0.5, fakeEmbedText)
+  assert.equal(rejectedGlass, null)
+
+  // Built-in 'human-face' accepts arbitrary human names ('Xinyue', 'A001', 'papa') via stored face image centroid while rejecting 'glass'
+  const faceScopeFilter = new SemanticScopeFilter()
+  faceScopeFilter.reset('human-face:人脸')
+  faceScopeFilter.setPrototype({
+    scopeKey: 'human-face:人脸',
+    positiveTextCentroid: [0, 0, 1],
+    negativeTextVectors: [[0, 1, 0]],
+    visualCentroid: null,
+  })
+  const faceTextEmbed = async (txt) => {
+    if (txt.includes('eyeglasses')) return [1, 0, 0]
+    if (txt.includes('human person')) return [0, 0, 1]
+    if (txt.toLowerCase().includes('glass')) return [0.95, 0.05, 0.05]
+    return [0.1, 0.5, 0.2] // arbitrary code-name 'A001' has weak text match to 'human face'
+  }
+  const storedCentroidFn = async (tid) => (tid === 't-a001' ? [0.05, 0.05, 0.95] : [0.95, 0.05, 0.05])
+  assert.equal(await faceScopeFilter.verifyRecognizedTarget('t-papa', 'papa', 'my hero', 'human-face', '人脸', 0.5, faceTextEmbed, storedCentroidFn), true)
+  assert.equal(await faceScopeFilter.verifyRecognizedTarget('t-a001', 'A001', 'tag', 'human-face', '人脸', 0.5, faceTextEmbed, storedCentroidFn), true)
+  assert.equal(await faceScopeFilter.verifyRecognizedTarget('t-glass', 'glass', 'black', 'human-face', '人脸', 0.5, faceTextEmbed, storedCentroidFn), false)
 })
 
 test('CameraTipsScheduler shows for 5s on camera start and repeats every 60s until stopped', async () => {

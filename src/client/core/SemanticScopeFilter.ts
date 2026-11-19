@@ -1,4 +1,4 @@
-import type { BoundingBox, RecognizedDetection } from '../../invariant'
+import type { BoundingBox, RecognizedDetection, VectorSearchCandidate } from '../../invariant'
 import { CameraScopeItem } from './CameraScopeModels'
 import { CutoutAugmenter } from './CutoutAugmenter'
 import { FastSamInferenceEngine } from './FastSamInferenceEngine'
@@ -30,6 +30,7 @@ interface ScopeTrackState {
   lastVector: readonly number[] | null
   recognizedTargetId: string | null
   recognizedTitle: string | null
+  recognizedSimilarity: number
   recognizedAt: number
 }
 
@@ -47,11 +48,23 @@ export class SemanticScopeFilter {
     'an unrelated everyday object',
     'blurry edge shadow or noise',
   ] as const
+  private static readonly NEGATIVE_CONFLICT_TOKENS: readonly (readonly string[])[] = [
+    ['wall', 'floor', 'ceiling', 'background', '墙', '壁', '地板', '天花板', '背景'],
+    ['desk', 'table', 'room', 'surface', '桌', '台面', '房间'],
+    ['object', 'clutter', 'thing', 'item', '杂物', '小东西', '物件', '物品'],
+    ['shadow', 'edge', 'noise', 'blur', '阴影', '边缘', '噪点'],
+  ]
+  private static readonly HUMAN_FACE_KEYWORDS = [
+    'face', 'human face', 'portrait', 'head', 'person', 'people', 'man', 'woman', 'dad', 'mom', 'papa', 'mama', 'father', 'mother',
+    '人脸', '脸', '人像', '头像', '肖像', '爸爸', '妈妈',
+  ] as const
+  public static readonly POST_RECOG_TEXT_SIM_FLOOR = 0.42
+  public static readonly COMPETITIVE_MARGIN = 0.08
   public static readonly SOFTMAX_TEMPERATURE = 0.05
   public static readonly STABLE_FRAMES = 2
   public static readonly REQUERY_MS = 2000
   public static readonly TRACK_EXPIRE_MS = 1800
-  public static readonly MATCH_IOU_THRESHOLD = 0.25
+  public static readonly MATCH_IOU_THRESHOLD = 0.40
   public static readonly MAX_QUERIES_PER_TICK = 4
 
   private activeScopeKey: string | null = null
@@ -59,6 +72,46 @@ export class SemanticScopeFilter {
   private nextTrackId = 1
   private readonly tracks = new Map<number, ScopeTrackState>()
   private lastBoxToTrack = new Map<string, number>()
+  private readonly postRecogScoreCache = new Map<string, { readonly score: number; readonly posSim: number; readonly allowed?: boolean }>()
+  private personDistractorVec: readonly number[] | null = null
+  private objectDistractorVec: readonly number[] | null = null
+
+  /**
+   * Drops any default background negative prompt that overlaps the user's chosen
+   * scope (e.g. searching for 'wall', '墙壁', 'desk', '杂物') so users never lose
+   * the ability to filter and tag background/small/clutter targets.
+   */
+  public static getEffectiveNegativeIndices(scopeText: string): readonly number[] {
+    const norm = scopeText.trim().toLowerCase()
+    const kept: number[] = []
+    for (let i = 0; i < SemanticScopeFilter.NEGATIVE_PROMPTS.length; i += 1) {
+      const tokens = SemanticScopeFilter.NEGATIVE_CONFLICT_TOKENS[i] ?? []
+      const conflicts = norm.length > 0 && tokens.some((tok) => norm.includes(tok))
+      if (!conflicts) kept.push(i)
+    }
+    return kept
+  }
+
+  public static matchesLiteralMetadata(
+    scopeId: string,
+    scopeText: string,
+    title: string,
+    description: string,
+  ): boolean {
+    const normScope = scopeText.trim().toLowerCase()
+    const normTitle = title.trim().toLowerCase()
+    const normDesc = description.trim().toLowerCase()
+    const combined = normTitle + ' ' + normDesc
+    if (scopeId === CameraScopeItem.HUMAN_FACE_ID) {
+      if (SemanticScopeFilter.HUMAN_FACE_KEYWORDS.some((kw) => combined.includes(kw))) {
+        return true
+      }
+    }
+    if (normScope.length === 0) return true
+    if (combined.includes(normScope)) return true
+    if (normTitle.length >= 2 && normScope.includes(normTitle)) return true
+    return false
+  }
 
   public static buildPositivePrompts(scopeId: string, scopeText: string): readonly string[] {
     if (scopeId === CameraScopeItem.HUMAN_FACE_ID) {
@@ -149,6 +202,143 @@ export class SemanticScopeFilter {
     this.prototype = null
     this.tracks.clear()
     this.lastBoxToTrack.clear()
+    this.postRecogScoreCache.clear()
+  }
+
+  public clearPostRecognitionCache(): void {
+    this.postRecogScoreCache.clear()
+    this.personDistractorVec = null
+    this.objectDistractorVec = null
+  }
+
+  /**
+   * Post-Recognition Semantic Gate: once the vector DB identifies a track's
+   * { targetId, title, description }, verify that the identified target matches the
+   * active non-'All' scope before drawing its BBox or pushing it to the Pocket.
+   * - For 'human-face', people are usually tagged by proper names (e.g. 'papa', 'Xinyue',
+   *   'Alice'), so we also verify the target's stored visual centroid against face vs
+   *   inanimate-object prototypes while rejecting clear non-face objects like 'glass'.
+   */
+  public async verifyRecognizedTarget(
+    targetId: string,
+    title: string,
+    description: string,
+    scopeId: string,
+    scopeText: string,
+    confidenceThreshold: number,
+    embedTextFn: (text: string) => Promise<readonly number[]>,
+    getStoredVisualCentroidFn?: (targetId: string) => Promise<readonly number[] | null>,
+  ): Promise<boolean> {
+    if (scopeId === CameraScopeItem.ALL_ID) return true
+    if (SemanticScopeFilter.matchesLiteralMetadata(scopeId, scopeText, title, description)) {
+      return true
+    }
+    const proto = this.prototype
+    if (proto === null) return false
+
+    const cacheKey = targetId + '|' + title + '|' + description
+    const cached = this.postRecogScoreCache.get(cacheKey)
+    const minScore = Math.max(0.55, confidenceThreshold)
+    if (cached !== undefined) {
+      if (cached.allowed !== undefined) return cached.allowed
+      return cached.posSim >= SemanticScopeFilter.POST_RECOG_TEXT_SIM_FLOOR && cached.score >= minScore
+    }
+
+    const labelText = description.trim().length > 0 ? title.trim() + ' — ' + description.trim() : title.trim()
+    const metaVec = await embedTextFn(labelText)
+    if (metaVec.length === 0) return false
+
+    if (scopeId === CameraScopeItem.HUMAN_FACE_ID) {
+      if (this.objectDistractorVec === null) {
+        this.objectDistractorVec = await embedTextFn('eyeglasses glasses cup mug bottle phone keyboard toy bag desk wall object accessory')
+      }
+      if (this.personDistractorVec === null) {
+        this.personDistractorVec = await embedTextFn('a human person face portrait name dad mom papa friend family member')
+      }
+      const objTextSim = this.objectDistractorVec.length > 0 ? SemanticScopeFilter.dotProduct(metaVec, this.objectDistractorVec) : 0
+      const personTextSim = this.personDistractorVec.length > 0 ? SemanticScopeFilter.dotProduct(metaVec, this.personDistractorVec) : 0
+      // If the label clearly names an inanimate object/accessory (like 'glass' / 'cup'), reject immediately
+      if (objTextSim > personTextSim + 0.04) {
+        this.postRecogScoreCache.set(cacheKey, { score: 0, posSim: 0, allowed: false })
+        return false
+      }
+      // Verify the target's actual stored image centroid in IndexedDB looks like a human face
+      const storedImgCentroid = getStoredVisualCentroidFn ? await getStoredVisualCentroidFn(targetId) : null
+      if (storedImgCentroid !== null && storedImgCentroid.length > 0) {
+        const faceImgSim = SemanticScopeFilter.dotProduct(storedImgCentroid, proto.positiveTextCentroid)
+        let maxNonFaceImgSim = -1
+        for (let i = 0; i < proto.negativeTextVectors.length; i += 1) {
+          const s = SemanticScopeFilter.dotProduct(storedImgCentroid, proto.negativeTextVectors[i])
+          if (s > maxNonFaceImgSim) maxNonFaceImgSim = s
+        }
+        if (this.objectDistractorVec.length > 0) {
+          const objImgSim = SemanticScopeFilter.dotProduct(storedImgCentroid, this.objectDistractorVec)
+          if (objImgSim > maxNonFaceImgSim) maxNonFaceImgSim = objImgSim
+        }
+        const faceImgProb =
+          maxNonFaceImgSim > -1
+            ? 1 / (1 + Math.exp((maxNonFaceImgSim - faceImgSim) / SemanticScopeFilter.SOFTMAX_TEMPERATURE))
+            : Math.max(0, Math.min(1, faceImgSim))
+        const allowed = faceImgProb >= Math.min(0.50, confidenceThreshold)
+        this.postRecogScoreCache.set(cacheKey, { score: faceImgProb, posSim: faceImgSim, allowed })
+        return allowed
+      }
+      const allowed = personTextSim >= objTextSim
+      this.postRecogScoreCache.set(cacheKey, { score: allowed ? 1 : 0, posSim: personTextSim, allowed })
+      return allowed
+    }
+
+    const posSim = SemanticScopeFilter.dotProduct(metaVec, proto.positiveTextCentroid)
+    let maxNegSim = -1
+    for (let i = 0; i < proto.negativeTextVectors.length; i += 1) {
+      const s = SemanticScopeFilter.dotProduct(metaVec, proto.negativeTextVectors[i])
+      if (s > maxNegSim) maxNegSim = s
+    }
+    if (this.personDistractorVec === null) {
+      this.personDistractorVec = await embedTextFn('a human person face portrait name dad mom papa friend family member')
+    }
+    if (this.personDistractorVec.length > 0) {
+      const personSim = SemanticScopeFilter.dotProduct(metaVec, this.personDistractorVec)
+      if (personSim > maxNegSim) maxNegSim = personSim
+    }
+    const score =
+      maxNegSim > -1
+        ? 1 / (1 + Math.exp((maxNegSim - posSim) / SemanticScopeFilter.SOFTMAX_TEMPERATURE))
+        : Math.max(0, Math.min(1, posSim))
+
+    this.postRecogScoreCache.set(cacheKey, { score, posSim })
+    return posSim >= SemanticScopeFilter.POST_RECOG_TEXT_SIM_FLOOR && score >= minScore
+  }
+
+  public async selectScopedMatch(
+    candidates: readonly VectorSearchCandidate[],
+    scopeId: string,
+    scopeText: string,
+    confidenceThreshold: number,
+    embedTextFn: (text: string) => Promise<readonly number[]>,
+    getStoredVisualCentroidFn?: (targetId: string) => Promise<readonly number[] | null>,
+  ): Promise<VectorSearchCandidate | null> {
+    if (candidates.length === 0) return null
+    if (scopeId === CameraScopeItem.ALL_ID) return candidates[0]
+    const top1Sim = candidates[0].similarity
+    for (let i = 0; i < candidates.length; i += 1) {
+      const cand = candidates[i]
+      if (top1Sim - cand.similarity > SemanticScopeFilter.COMPETITIVE_MARGIN) {
+        break
+      }
+      const ok = await this.verifyRecognizedTarget(
+        cand.targetId,
+        cand.title,
+        cand.description ?? '',
+        scopeId,
+        scopeText,
+        confidenceThreshold,
+        embedTextFn,
+        getStoredVisualCentroidFn,
+      )
+      if (ok) return cand
+    }
+    return null
   }
 
   public getActiveScopeKey(): string | null {
@@ -190,15 +380,18 @@ export class SemanticScopeFilter {
 
     for (let i = 0; i < ordered.length; i += 1) {
       const box = ordered[i]
+      const boxArea = Math.max(1, (box.x2 - box.x1) * (box.y2 - box.y1))
       let bestTrack: ScopeTrackState | null = null
       let bestIoU = 0
       for (const track of this.tracks.values()) {
         if (claimedTracks.has(track.trackId)) continue
         const iou = FastSamInferenceEngine.computeIoU(track.lastBox, box)
-        if (iou > bestIoU) {
-          bestIoU = iou
-          bestTrack = track
-        }
+        if (iou <= bestIoU) continue
+        const trackArea = Math.max(1, (track.lastBox.x2 - track.lastBox.x1) * (track.lastBox.y2 - track.lastBox.y1))
+        const scaleRatio = Math.max(boxArea / trackArea, trackArea / boxArea)
+        if (scaleRatio > 2.5 && iou < 0.55) continue
+        bestIoU = iou
+        bestTrack = track
       }
 
       let targetTrack: ScopeTrackState
@@ -222,6 +415,7 @@ export class SemanticScopeFilter {
           lastVector: null,
           recognizedTargetId: null,
           recognizedTitle: null,
+          recognizedSimilarity: 0,
           recognizedAt: 0,
         }
         this.tracks.set(trackId, targetTrack)
@@ -307,16 +501,19 @@ export class SemanticScopeFilter {
     targetId: string | null,
     title: string | null,
     nowMs: number,
+    similarity = 0,
   ): void {
     const track = this.tracks.get(trackId)
     if (!track) return
     if (matched && targetId !== null && title !== null) {
       track.recognizedTargetId = targetId
       track.recognizedTitle = title
+      track.recognizedSimilarity = similarity
       track.recognizedAt = nowMs
     } else {
       track.recognizedTargetId = null
       track.recognizedTitle = null
+      track.recognizedSimilarity = 0
     }
   }
 
@@ -375,6 +572,7 @@ export class SemanticScopeFilter {
           y2: box.y2,
           colorIndex: box.colorIndex,
           recognizedAt: track.recognizedAt,
+          similarity: track.recognizedSimilarity,
         })
       }
     }

@@ -16,6 +16,10 @@ export const FASTSAM_REMOTE_URL =
 export const EMBEDDING_MODEL_ID = 'onnx-community/embeddinggemma-2-ONNX'
 export const EMBEDDING_DIM = 768
 export const DEFAULT_MATCH_THRESHOLD = 0.78
+export const DEFAULT_RECOGNITION_IOU_THRESHOLD = 0.30
+export const DEFAULT_MATCH_TOP_K = 30
+export const MIN_MATCH_TOP_K = 1
+export const MAX_MATCH_TOP_K = 500
 export const DEFAULT_SCOPE_CONFIDENCE_THRESHOLD = 0.50
 
 export const ORT_ASSET_FILES = [
@@ -66,6 +70,8 @@ export interface NameTagPreferences {
   readonly cameraScopes?: CameraScopeStateData
   readonly scopeConfidenceThreshold?: number
   readonly matchThreshold?: number
+  readonly recognitionIouThreshold?: number
+  readonly matchTopK?: number
 }
 
 export interface BoundingBox {
@@ -138,12 +144,21 @@ export interface VectorTableRow {
   readonly createdAt: number
 }
 
+export interface VectorSearchCandidate {
+  readonly targetId: string
+  readonly title: string
+  readonly description?: string | null
+  readonly similarity: number
+}
+
 export interface VectorSearchMatchResult {
   readonly index: number
   readonly matched: boolean
   readonly targetId: string | null
   readonly title: string | null
+  readonly description?: string | null
   readonly similarity: number
+  readonly candidates?: readonly VectorSearchCandidate[]
 }
 
 export interface RecognizedDetection {
@@ -155,6 +170,7 @@ export interface RecognizedDetection {
   readonly y2: number
   readonly colorIndex: number
   readonly recognizedAt: number
+  readonly similarity?: number
 }
 
 export interface VectorSearchResponse {

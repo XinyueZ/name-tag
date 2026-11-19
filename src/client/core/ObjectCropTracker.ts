@@ -25,6 +25,7 @@ export class SegmentTrack {
   public rawPocketUrl: string | null = null
   public matchedTargetId: string | null = null
   public matchedTitle: string | null = null
+  public matchedSimilarity = 0
   public matchedAtMs = 0
 
   public constructor(id: string, box: BoundingBox, nowMs: number) {
@@ -84,13 +85,16 @@ export class ObjectCropTracker {
       let bestTrack: SegmentTrack | null = null
       let bestIoU = ObjectCropTracker.MATCH_IOU
 
+      const instArea = Math.max(1, (inst.x2 - inst.x1) * (inst.y2 - inst.y1))
       for (const track of this.tracks.values()) {
         if (matchedTrackIds.has(track.id)) continue
         const iou = FastSamInferenceEngine.computeIoU(track.box, inst)
-        if (iou >= bestIoU) {
-          bestIoU = iou
-          bestTrack = track
-        }
+        if (iou < bestIoU) continue
+        const trackArea = Math.max(1, (track.box.x2 - track.box.x1) * (track.box.y2 - track.box.y1))
+        const scaleRatio = Math.max(instArea / trackArea, trackArea / instArea)
+        if (scaleRatio > 2.5 && iou < 0.55) continue
+        bestIoU = iou
+        bestTrack = track
       }
 
       if (bestTrack === null) {
@@ -165,16 +169,19 @@ export class ObjectCropTracker {
     targetId: string | null,
     title: string | null,
     nowMs = Date.now(),
+    similarity = 0,
   ): void {
     const track = this.tracks.get(trackId)
     if (!track) return
     if (matched && targetId !== null && title !== null) {
       track.matchedTargetId = targetId
       track.matchedTitle = title
+      track.matchedSimilarity = similarity
       track.matchedAtMs = nowMs
     } else {
       track.matchedTargetId = null
       track.matchedTitle = null
+      track.matchedSimilarity = 0
     }
   }
 
@@ -192,6 +199,7 @@ export class ObjectCropTracker {
           y2: track.box.y2,
           colorIndex: track.box.colorIndex,
           recognizedAt: track.matchedAtMs,
+          similarity: track.matchedSimilarity,
         })
       }
     }

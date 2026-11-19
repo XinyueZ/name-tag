@@ -1,14 +1,18 @@
 import { Document, type DocumentInterface } from '@langchain/core/documents'
 import type { EmbeddingsInterface } from '@langchain/core/embeddings'
 import { VectorStore } from '@langchain/core/vectorstores'
-import type {
-  SaveTaggedTargetRequest,
-  SaveTaggedTargetResponse,
-  TagVectorMetadata,
-  VectorSearchMatchResult,
-  VectorSearchResponse,
-  VectorStoreStatsResponse,
-  VectorTableRow,
+import {
+  DEFAULT_MATCH_TOP_K,
+  MAX_MATCH_TOP_K,
+  MIN_MATCH_TOP_K,
+  type SaveTaggedTargetRequest,
+  type SaveTaggedTargetResponse,
+  type TagVectorMetadata,
+  type VectorSearchCandidate,
+  type VectorSearchMatchResult,
+  type VectorSearchResponse,
+  type VectorStoreStatsResponse,
+  type VectorTableRow,
 } from '../../invariant'
 
 export interface StoredVectorRecord {
@@ -348,31 +352,54 @@ export class BrowserTargetVectorRepository {
   public async searchMatches(
     vectors: readonly (readonly number[])[],
     threshold: number,
+    topK = DEFAULT_MATCH_TOP_K,
   ): Promise<VectorSearchResponse> {
     const safeThreshold = Math.max(0, Math.min(1, Number.isFinite(threshold) ? threshold : 0.78))
+    const safeTopK = Math.max(
+      MIN_MATCH_TOP_K,
+      Math.min(MAX_MATCH_TOP_K, Number.isFinite(topK) ? Math.round(topK) : DEFAULT_MATCH_TOP_K),
+    )
+    const rawLimit = Math.max(safeTopK * 6, 30)
     const results: VectorSearchMatchResult[] = []
     for (let i = 0; i < vectors.length; i += 1) {
       const qVec = vectors[i]
       if (!Array.isArray(qVec) || qVec.length === 0) {
-        results.push({ index: i, matched: false, targetId: null, title: null, similarity: 0 })
+        results.push({ index: i, matched: false, targetId: null, title: null, similarity: 0, candidates: [] })
         continue
       }
-      const hits = await this.store.similaritySearchVectorWithScore(qVec.slice(), 1)
+      const hits = await this.store.similaritySearchVectorWithScore(qVec.slice(), rawLimit)
       if (hits.length === 0) {
-        results.push({ index: i, matched: false, targetId: null, title: null, similarity: 0 })
+        results.push({ index: i, matched: false, targetId: null, title: null, similarity: 0, candidates: [] })
         continue
       }
-      const [doc, similarity] = hits[0]
-      const meta = (doc.metadata ?? {}) as Partial<TagVectorMetadata>
-      const targetId = typeof meta.targetId === 'string' && meta.targetId.length > 0 ? meta.targetId : null
-      const title = typeof meta.title === 'string' && meta.title.trim().length > 0 ? meta.title.trim() : null
-      const matched = targetId !== null && similarity >= safeThreshold
+      const seenTargetIds = new Set<string>()
+      const candidates: VectorSearchCandidate[] = []
+      for (let h = 0; h < hits.length; h += 1) {
+        const [doc, sim] = hits[h]
+        if (sim < safeThreshold) break
+        const meta = (doc.metadata ?? {}) as Partial<TagVectorMetadata>
+        const tid = typeof meta.targetId === 'string' && meta.targetId.length > 0 ? meta.targetId : null
+        const title = typeof meta.title === 'string' && meta.title.trim().length > 0 ? meta.title.trim() : null
+        if (tid === null || title === null || seenTargetIds.has(tid)) continue
+        seenTargetIds.add(tid)
+        candidates.push({
+          targetId: tid,
+          title,
+          description: typeof meta.description === 'string' ? meta.description.trim() : null,
+          similarity: Number(sim.toFixed(4)),
+        })
+        if (candidates.length >= safeTopK) break
+      }
+      const top1 = candidates[0] ?? null
+      const bestRawSim = hits[0][1]
       results.push({
         index: i,
-        matched,
-        targetId: matched ? targetId : null,
-        title: matched ? title : null,
-        similarity: Number(similarity.toFixed(4)),
+        matched: top1 !== null,
+        targetId: top1?.targetId ?? null,
+        title: top1?.title ?? null,
+        description: top1?.description ?? null,
+        similarity: top1 ? top1.similarity : Number(bestRawSim.toFixed(4)),
+        candidates,
       })
     }
     return { results }
@@ -430,6 +457,18 @@ export class BrowserTargetVectorRepository {
       if (title.length === 0) continue
       if (title === norm || title.includes(norm) || norm.includes(title)) {
         matched.push(rec.vector.slice())
+      }
+    }
+    return matched
+  }
+
+  public async getVectorsByTargetId(targetId: string): Promise<number[][]> {
+    if (!targetId) return []
+    const records = await this.store.getAllRecords()
+    const matched: number[][] = []
+    for (let i = 0; i < records.length; i += 1) {
+      if (records[i].metadata?.targetId === targetId) {
+        matched.push(records[i].vector.slice())
       }
     }
     return matched

@@ -246,3 +246,32 @@ Chronological append-only log of project milestones, ingests, builds, and lint c
 - Rendered 2x Retina diagram `assets/semantic-filter-pipeline.png` illustrating the two-layer filtering architecture (`GranularityFilter` -> `SemanticScopeFilter`), contrastive margin scoring, few-shot fusion, and one-vector-two-uses Pocket pipeline.
 - Added maintained wiki page `wiki/semantic-filtering-and-tradeoffs.md` (indexed in `.wiki/index.md` and cross-linked from `wiki/architecture.md`) detailing the ADR & empirical trade-offs against standalone VLMs such as `Valen-Team/valen-sdk-js`.
 - Updated `README.md` (both EN and ZH sections + TOC) with the new PNG diagram, dedicated filter architecture & model trade-off section (with `https://github.com/Valen-Team/valen-sdk-js` link), and refreshed UI reference for `CameraScopeDropdown` and persisted thresholds.
+
+## [2026-11-19] ingest | Add Recognition Dedup IoU slider and tighter-inner-box NMS
+- Added `DEFAULT_RECOGNITION_IOU_THRESHOLD = 0.30` in `src/invariant.ts` and persisted `recognitionIouThreshold` independently in `PreferencesStore` (`localStorage`).
+- Added `PocketCaptureManager.suppressOverlappingDetections()` (area-ascending NMS keeping tighter inner foreground targets over enclosing outer background boxes) plus a 2.5× scale-ratio guard in `ObjectCropTracker.updateFrame` and `PocketCaptureManager.trackRecognizedBoxes`.
+- Mounted the new `识别框去重 IoU 阈值 / Recognition Dedup IoU` slider directly beneath `Capture Match Similarity` in `CameraControlStrip.tsx`, wired live suppression in `NameTagWorkspace.tsx`, updated `T.js` (143 EN/ZH keys, 0 unused), `README.md`, unit tests (`21/21` passing), and `.wiki/`.
+
+## [2026-11-19] lint | Upgrade recognition dedup to same-target max(IoU, IoM) containment
+- Updated `PocketCaptureManager.suppressOverlappingDetections()` to compute both `IoU` and `IoM = inter / min(areaA, areaB)`: same-target overlapping boxes use `max(IoU, IoM)` so an enclosing full-frame background wall (`IoM ≈ 1.0`) is reliably suppressed at any camera distance or threshold (`< 1.00`), while different targets (e.g., a mug held in front of a person) continue using standard `IoU` so both remain visible.
+
+## [2026-11-19] ingest | Add post-recognition semantic gate and Layer 1 negative-prompt conflict guard
+- Added `description` to `VectorSearchMatchResult` (`src/invariant.ts` & `src/client/core/BrowserVectorStore.ts`).
+- Added `SemanticScopeFilter.getEffectiveNegativeIndices()`, `matchesLiteralMetadata()`, and per-`targetId` cached `verifyRecognizedTarget()` (`src/client/core/SemanticScopeFilter.ts`), keeping Layer 1 open for tagging small items/clutter/walls while strictly gating recognized DB outputs (BBox + Pocket) in `NameTagWorkspace.tsx` so e.g. `papa` is blocked when filtering for `glass` / `眼镜`.
+- Added unit tests (`21/21` passing) and updated `README.md` (EN/ZH) & `.wiki/` (`raw/015`, `wiki/semantic-filtering-and-tradeoffs.md`, `index.md`, `log.md`).
+
+## [2026-11-19] lint | Prevent track drift to adjacent segments & rank sibling dedup by similarity
+- Tightened `SemanticScopeFilter.MATCH_IOU_THRESHOLD` (`0.25 -> 0.40` + `2.5×` scale-ratio guard) and `PocketCaptureManager.trackRecognizedBoxes` (`0.25 -> 0.35` + 1-to-1 live claiming) so a recognized `glass` track no longer drifts onto an adjacent forehead/hair mask.
+- Propagated actual vector `similarity` onto `RecognizedDetection` across `ObjectCropTracker`, `SemanticScopeFilter`, and `NameTagWorkspace`, and updated `PocketCaptureManager.suppressOverlappingDetections` so enclosing outer boxes still yield to tighter inner boxes (`iom >= 0.75`) while touching sibling boxes of the same target keep the highest-similarity match.
+
+## [2026-11-19] ingest | Add persisted Match Candidates Top-K slider (default Top 5) & competitive margin selection
+- Upgraded `BrowserTargetVectorRepository.searchMatches()` (`src/client/core/BrowserVectorStore.ts`) to return up to `topK` distinct `targetId` candidates (`VectorSearchCandidate[]`) above `matchThreshold`.
+- Added `SemanticScopeFilter.selectScopedMatch()` (`COMPETITIVE_MARGIN = 0.08`) to pick the highest-similarity scope-verified candidate within `0.08` of Top-1, solving Top-1 shadowing (e.g., `glass 0.84` masking `papa 0.82` when filtering for `papa`).
+- Added persisted `matchTopK` (`1..20`, default `5`) in `src/invariant.ts`, `PreferencesStore.ts`, `CameraControlStrip.tsx` (Card 1 slider), `NameTagWorkspace.tsx`, `T.js` (145 EN/ZH keys, 0 unused), `README.md`, unit tests (`21/21` passing), and `.wiki/`.
+
+## [2026-11-19] lint | Fix human-face post-recognition gate rejecting person proper names like 'papa'
+- Diagnosed why selecting built-in 「人脸 / Human Face」 showed `已筛选：人脸` in HUD (Layer 1 passed) yet hid the `papa` BBox: proper names (`papa`, `Xinyue`, `Alice`, `A001`) do not literally match `human face` in text-only embedding space.
+- Added `BrowserTargetVectorRepository.getVectorsByTargetId()` (`src/client/core/BrowserVectorStore.ts`) and upgraded `SemanticScopeFilter.verifyRecognizedTarget()` to verify built-in `human-face` candidates using their stored visual centroid in IndexedDB (while immediately rejecting clear inanimate object/accessory labels like `glass` / `cup`), plus expanded `HUMAN_FACE_KEYWORDS` and lowered `POST_RECOG_TEXT_SIM_FLOOR` to `0.42`.
+
+## [2026-11-19] ingest | Increase Match Candidates Top-K range to 1..500 with default 30
+- Updated `DEFAULT_MATCH_TOP_K = 30` and `MAX_MATCH_TOP_K = 500` in `src/invariant.ts`, plus synchronized `T.js`, `README.md`, unit tests, and `.wiki/`.

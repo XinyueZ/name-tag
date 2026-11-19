@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react'
-import { DEFAULT_MATCH_THRESHOLD, type ModelStatusResponse } from '../../invariant'
+import { DEFAULT_MATCH_THRESHOLD, DEFAULT_MATCH_TOP_K, DEFAULT_RECOGNITION_IOU_THRESHOLD, MAX_MATCH_TOP_K, MIN_MATCH_TOP_K, type ModelStatusResponse } from '../../invariant'
 import type { CameraDeviceOption } from '../core/CameraController'
 import type { LocaleService } from '../core/LocaleService'
 import { MdSliderField } from './MdSliderField'
@@ -19,8 +19,12 @@ export interface CameraControlStripProps {
   readonly hostStorageStatus: ModelStatusResponse | null
   readonly vectorStats: { readonly totalTargets: number; readonly totalVectors: number }
   readonly matchThreshold: number
+  readonly recognitionIouThreshold: number
+  readonly matchTopK: number
   readonly matchError?: string | null
   readonly onMatchThresholdChange: (value: number) => void
+  readonly onRecognitionIouThresholdChange: (value: number) => void
+  readonly onMatchTopKChange: (value: number) => void
   readonly locale: LocaleService
   readonly onToggleCamera: () => void
   readonly onToggleMirror: () => void
@@ -185,6 +189,46 @@ export function CameraControlStrip(props: CameraControlStripProps): React.JSX.El
           </button>
         }
         onChange={props.onMatchThresholdChange}
+      />
+
+      <MdSliderField
+        label={props.locale.translate('match.iouLabel')}
+        badge={props.recognitionIouThreshold.toFixed(2)}
+        value={props.recognitionIouThreshold}
+        min={0}
+        max={1}
+        step={0.01}
+        hint={props.locale.translate('match.iouHint')}
+        headerAction={
+          <button
+            type="button"
+            className="nt-mini-btn"
+            onClick={() => props.onRecognitionIouThresholdChange(DEFAULT_RECOGNITION_IOU_THRESHOLD)}
+          >
+            {props.locale.translate('match.resetDefault')}
+          </button>
+        }
+        onChange={props.onRecognitionIouThresholdChange}
+      />
+
+      <MdSliderField
+        label={props.locale.translate('match.topKLabel')}
+        badge={'Top ' + props.matchTopK}
+        value={props.matchTopK}
+        min={MIN_MATCH_TOP_K}
+        max={MAX_MATCH_TOP_K}
+        step={1}
+        hint={props.locale.translate('match.topKHint')}
+        headerAction={
+          <button
+            type="button"
+            className="nt-mini-btn"
+            onClick={() => props.onMatchTopKChange(DEFAULT_MATCH_TOP_K)}
+          >
+            {props.locale.translate('match.resetDefault')}
+          </button>
+        }
+        onChange={(v) => props.onMatchTopKChange(Math.round(v))}
       />
       {props.matchError ? (
         <div className="nt-banner is-error" role="alert">
