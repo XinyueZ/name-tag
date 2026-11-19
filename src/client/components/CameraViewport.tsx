@@ -175,6 +175,15 @@ export class CanvasOverlayRenderer {
     }
   }
 
+  public static formatRecognizedLabel(det: RecognizedDetection): string {
+    if (typeof det.similarity === 'number' && Number.isFinite(det.similarity)) {
+      const clamped = Math.max(0, Math.min(1, det.similarity))
+      const rounded = (Math.round(clamped * 1000) / 1000).toFixed(3)
+      return det.title + ' ' + rounded
+    }
+    return det.title
+  }
+
   private static drawRoundedRect(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -320,8 +329,8 @@ export class CanvasOverlayRenderer {
         ctx.strokeStyle = boxColor
         ctx.strokeRect(bx, by, bw, bh)
 
-        // Classic CV title tag flush on top-left corner of bbox
-        const labelText = det.title
+        // Classic CV title + 3-decimal probability tag flush on top-left corner of bbox
+        const labelText = CanvasOverlayRenderer.formatRecognizedLabel(det)
         const textW = ctx.measureText(labelText).width
         const tagW = textW + 14
         const tagH = 22

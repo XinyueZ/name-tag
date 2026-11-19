@@ -275,3 +275,8 @@ Chronological append-only log of project milestones, ingests, builds, and lint c
 
 ## [2026-11-19] ingest | Increase Match Candidates Top-K range to 1..500 with default 30
 - Updated `DEFAULT_MATCH_TOP_K = 30` and `MAX_MATCH_TOP_K = 500` in `src/invariant.ts`, plus synchronized `T.js`, `README.md`, unit tests, and `.wiki/`.
+
+## [2026-11-19] lint | Enforce strict per-class IoU NMS and display 3-decimal probability on recognized BBox tags
+- Restricted `PocketCaptureManager.suppressOverlappingDetections()` to strict same-label-only (per-class) NMS (`if (!sameTarget) continue`) so overlapping/nested distinct labels (`papa` + `glass`) never suppress each other at any IoU threshold.
+- Added `CanvasOverlayRenderer.formatRecognizedLabel()` (`src/client/components/CameraViewport.tsx`) to render `title` + 3-decimal rounded similarity (e.g., `glass 0.912`) on recognized CV bounding box tags independently of the segmentation `Prob. Tags` switch.
+- Updated `T.js`, `README.md`, and unit tests (`21/21` passing).

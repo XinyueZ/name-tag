@@ -131,7 +131,7 @@ We evaluated and prototyped running a dedicated client-side multimodal decision/
 - **Center Divider Handle (`SplitPaneDivider`)**: Drag horizontally to resize camera viewport vs. control panel (`26% ~ 74%`); double-click to reset `50 / 50`.
 
 #### B. Left Pane — Live Camera Viewport (`CameraViewport`)
-- **Video + High-DPI Segmentation Canvas**: Live camera stream (mirrored by default) overlaid with colored instance segmentation masks and crisp contours. Hovering highlights a segment; clicking opens **Target Tagging**. Once an object is recognized against the FAISS vector store, a classic CV **bounding box + `title` tag** is drawn directly around it (unaffected by the `Prob. Tags` switch).
+- **Video + High-DPI Segmentation Canvas**: Live camera stream (mirrored by default) overlaid with colored instance segmentation masks and crisp contours. Hovering highlights a segment; clicking opens **Target Tagging**. Once an object is recognized against the browser vector store, a classic CV **bounding box + `title` + 3-decimal similarity tag** (e.g., `glass 0.912`) is drawn directly around it (completely independent of the segmentation `Prob. Tags` switch).
 - **Top-Left Editable Scope Dropdown (`CameraScopeDropdown`)**: Anchored at the top-left of the camera frame with two locked built-in options (**`All`** and **`Human Face`**) plus unbounded user-added targets (press `Enter` continuously to add; custom items support inline `✎` rename and `×` delete). Includes an internal **`Filter Confidence`** slider (`0.00 ~ 1.00`, default **`0.50`**, persisted in `localStorage`) directly beneath the input, plus a warm golden-amber non-dismissible **Tips bubble** (appears for 5s on every camera start and repeats every 60s).
 - **HUD Chips**: Shows viewport label, active semantic scope filter status chip (matched count & peak score when non-`All`), FastSAM-s status, click-to-tag hint, live resolution, and detection FPS.
 
@@ -149,7 +149,7 @@ We evaluated and prototyped running a dedicated client-side multimodal decision/
   - **`Clear Cache`**: Wipes `FastSAM-s` IndexedDB cache, `EmbeddingGemma 2` Browser Cache (`transformers-cache`), saved granularity presets/preferences (`localStorage`), the browser vector database (`dsh-name-tag-vectors`), and the Pocket.
 - **Dual Model Status Banners**: Real-time lazy-load progress bars and execution backend badges (`WebGPU` / `WASM`) for both **FastSAM-s** and **EmbeddingGemma 2**.
 - **`Capture Match Similarity` Slider**: Controls Pocket vector DB cosine similarity (`0.00 ~ 1.00`, **default `0.78`**, persisted in `localStorage` independently from the dropdown's `Filter Confidence` slider and reset on `Clear Cache`) with a **`Default`** reset button.
-- **`Recognition Dedup IoU` Slider**: Placed directly beneath `Capture Match Similarity` (`0.00 ~ 1.00`, **default `0.30`**, persisted in `localStorage` with a **`Default`** reset button). Applies `max(IoU, IoM)` suppression for same-target boxes (keeping tighter inner boxes for enclosures and higher-similarity hits for touching siblings) and standard `IoU` for distinct targets.
+- **`Recognition Dedup IoU` Slider**: Placed directly beneath `Capture Match Similarity` (`0.00 ~ 1.00`, **default `0.30`**, persisted in `localStorage` with a **`Default`** reset button). Runs **strict per-class NMS only within the same label** (`max(IoU, IoM)` keeping tighter inner boxes for enclosures and higher-similarity hits for touching siblings); different labels (e.g., `papa` and `glass`) never suppress each other even when nested.
 - **`Match Candidates Top-K` Slider**: Placed directly beneath `Recognition Dedup IoU` (`Top 1 ~ Top 500`, **default `Top 30`**, persisted in `localStorage` with a **`Default`** reset button). When filtering a non-`All` scope, `BrowserTargetVectorRepository.searchMatches` returns up to Top-K distinct database targets above `matchThreshold`, and `SemanticScopeFilter.selectScopedMatch` picks the best scope-matching target within a `0.08` competitive margin of Top-1 (solving Top-1 shadowing such as `glass` shadowing `papa` while preventing pure glasses crops from being mislabeled `papa`).
 - **`Client-Side Local Storage & Caches` (Collapsible, default closed)**: Expands to display the browser vector DB (`IndexedDB dsh-name-tag-vectors` + target/vector counts), `localStorage` preferences key, browser model caches, and the optional read-only Host model mirror path.
 
@@ -276,7 +276,7 @@ pnpm dsh web
 - **中间分栏拖动把手（`SplitPaneDivider`）**：支持左右横向拖拽调节摄像头区域与右侧功能区宽度（`26% ~ 74%`），双击重置为 `50 / 50`。
 
 #### B. 左侧视窗 — 实时摄像头区域（`CameraViewport`）
-- **实时视频 + 高 DPI 分割叠加层**：实时渲染摄像头画面（默认开启镜像），并覆盖多色实例分割掩码与轮廓线；鼠标悬停会高亮对应块，点击即弹出「目标标记」弹窗。一旦物体在 FAISS 向量库中被认出，画面上会同步在其周围绘制经典的 CV **矩形边界框 + `title` 标题标签**（不受「概率标签」开关影响）。
+- **实时视频 + 高 DPI 分割叠加层**：实时渲染摄像头画面（默认开启镜像），并覆盖多色实例分割掩码与轮廓线；鼠标悬停会高亮对应块，点击即弹出「目标标记」弹窗。一旦物体在浏览器向量库中被认出，画面上会同步在其周围绘制经典的 CV **矩形边界框 + `title` + 三位小数概率标签**（例如 `glass 0.912`，四舍五入，与分割掩码的「概率标签」开关相互独立）。
 - **左上方可编辑类别筛选下拉框（`CameraScopeDropdown`）**：内置两个不可编辑、不可删除的固定项 **「所有」** 与 **「人脸」**，支持在输入框中连续输入并按 `Enter` 无限添加自定义目标（自定义项支持行内 `✎` 重命名与 `×` 删除）；输入框正下方内置 **「筛选置信度阈值」** 滑块（`0.00 ~ 1.00`，默认 **`0.50`**，持久化于 `localStorage`）；每次开启摄像头时左上方会弹出 5 秒不可主动关闭的暖金渐变 **Tips 气泡**，并每 1 分钟自动重弹一次。
 - **顶部悬浮 HUD 胶囊**：展示视窗名称、当前语义筛选状态芯片（非「所有」时实时显示命中数与最高分）、模型状态、点击标记提示、实时分辨率与检测 FPS。
 
@@ -294,7 +294,7 @@ pnpm dsh web
   - **「清缓存」**：一键清空 `FastSAM-s` IndexedDB 缓存、`EmbeddingGemma 2` 浏览器缓存（`transformers-cache`）、颗粒度参数与已保存预设（`localStorage`）、浏览器向量库（`dsh-name-tag-vectors`）以及口袋内容。
 - **双模型状态与进度条**：分别展示 `FastSAM-s` 与 `EmbeddingGemma 2` 的加载状态及执行后端（`WebGPU` / `WASM`）。
 - **「捕捉匹配相似度阈值」滑块**：专用于「口袋」功能的向量库余弦相似度阈值（范围 `0.00 ~ 1.00`，**默认 `0.78`**，与下拉框内的「筛选置信度阈值」相互独立，均持久化于 `localStorage` 并在「清缓存」时重置），右侧配有 **「默认」** 快捷重置按钮。
-- **「识别框去重 IoU 阈值」滑块**：位于「捕捉匹配相似度阈值」正下方（范围 `0.00 ~ 1.00`，**默认 `0.30`**，持久化于 `localStorage` 并配有 **「默认」** 快捷重置按钮）。同类目标按 `max(IoU, IoM)` 去重（包裹型大框优先留紧凑内框，相邻搭边框优先留高相似度目标），不同目标按标准 `IoU` 去重。
+- **「识别框去重 IoU 阈值」滑块**：位于「捕捉匹配相似度阈值」正下方（范围 `0.00 ~ 1.00`，**默认 `0.30`**，持久化于 `localStorage` 并配有 **「默认」** 快捷重置按钮）。严格执行**仅同标签内生效的 Per-Class NMS**（`max(IoU, IoM)`，包裹型留紧凑内框、搭边型留高相似度框），不同标签（如 `papa` 与 `glass`）即使互相包含也绝不互删。
 - **「匹配候选 Top-K」滑块**：位于「识别框去重 IoU 阈值」正下方（范围 `Top 1 ~ Top 500`，**默认 `Top 30`**，持久化于 `localStorage` 并配有 **「默认」** 快捷重置按钮）。在非「所有」筛选模式下，向量库返回前 K 个达标不同目标，由 `SemanticScopeFilter.selectScopedMatch` 在距总 Top-1 不超过 `0.08` 竞争间隔的候选中择优匹配当前筛选目标，避免目标被其他高分局部物体（如 `glass` 遮挡 `papa`）遮蔽。
 - **「客户端本地存储与缓存位置」折叠子块（默认关闭）**：点击可展开查看浏览器向量库（`IndexedDB dsh-name-tag-vectors` 及目标/向量数统计）、`localStorage` 偏好键名、浏览器模型缓存，以及宿主机只读公共模型镜像路径（无任何用户数据）。
 

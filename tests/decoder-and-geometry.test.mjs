@@ -276,10 +276,16 @@ test('PocketCaptureManager deduplicates by targetId and clamps floating window p
   const dedupAt050 = PocketCaptureManager.suppressOverlappingDetections([outerPapa, smallInnerPapa], 0.50)
   assert.equal(dedupAt050.length, 1)
   assert.equal(dedupAt050[0].x1, 350)
-  // Different target (mug held inside papa) uses standard IoU so both remain visible
-  const mugInFront = { targetId: 't-mug', title: 'mug', x1: 420, y1: 320, x2: 520, y2: 440, colorIndex: 2, recognizedAt: 1002 }
-  const keepDistinct = PocketCaptureManager.suppressOverlappingDetections([smallInnerPapa, mugInFront], 0.30)
+  // Different labels NEVER suppress each other (strict per-class NMS), even with 85%+ overlap at threshold 0.05
+  const bigGlassesOnPapa = { targetId: 't-glass', title: 'glass', x1: 360, y1: 230, x2: 640, y2: 510, colorIndex: 2, recognizedAt: 1002, similarity: 0.92 }
+  const keepDistinct = PocketCaptureManager.suppressOverlappingDetections([smallInnerPapa, bigGlassesOnPapa], 0.05)
   assert.equal(keepDistinct.length, 2)
+
+  // Classic CV recognized BBox label formats title + 3-decimal rounded probability
+  const { CanvasOverlayRenderer } = clientExports
+  assert.equal(CanvasOverlayRenderer.formatRecognizedLabel({ ...bigGlassesOnPapa, similarity: 0.8746 }), 'glass 0.875')
+  assert.equal(CanvasOverlayRenderer.formatRecognizedLabel({ ...bigGlassesOnPapa, similarity: 0.8 }), 'glass 0.800')
+  assert.equal(CanvasOverlayRenderer.formatRecognizedLabel({ ...smallInnerPapa }), 'papa')
   // Touching sibling same-target boxes (e.g. forehead touching glasses rim): higher similarity wins
   const foreheadGlass = { targetId: 't-glass', title: 'glass', x1: 100, y1: 100, x2: 300, y2: 205, colorIndex: 0, recognizedAt: 1000, similarity: 0.79 }
   const realGlass = { targetId: 't-glass', title: 'glass', x1: 100, y1: 185, x2: 305, y2: 255, colorIndex: 1, recognizedAt: 1001, similarity: 0.93 }

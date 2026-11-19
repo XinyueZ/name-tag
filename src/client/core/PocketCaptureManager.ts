@@ -119,13 +119,13 @@ export class PocketCaptureManager {
   }
 
   /**
-   * Suppresses overlapping recognized boxes, strictly preferring the tighter inner
-   * foreground box over any giant enclosing background box:
-   * - For the SAME target (same targetId or title): compares max(IoU, IoM) so an
-   *   enclosing background wall box (IoM ≈ 1.0 even when IoU is small) is always
-   *   suppressed across all camera angles and distances.
-   * - For DIFFERENT targets (e.g., a mug held in front of a person): compares
-   *   standard IoU so distinct foreground objects inside a larger person stay visible.
+   * Strict Per-Class / Same-Target-Only NMS for recognized boxes:
+   * - Only compares detections sharing the SAME label (same targetId or same title).
+   *   Different labels (e.g., 'papa' + 'glass' + 'hat') NEVER suppress each other,
+   *   even when deeply nested or overlapping at low IoU thresholds.
+   * - Within the same label, compares max(IoU, IoM) >= iouThreshold: prefers tighter
+   *   inner foreground boxes for enclosures (iom >= 0.75) and higher similarity for
+   *   touching siblings.
    */
   public static suppressOverlappingDetections(
     detections: readonly RecognizedDetection[],
@@ -153,15 +153,16 @@ export class PocketCaptureManager {
       let suppressed = false
       for (let j = 0; j < kept.length; j += 1) {
         const existing = kept[j]
-        const existingArea = Math.max(1, (existing.x2 - existing.x1) * (existing.y2 - existing.y1))
-        const { iou, iom } = PocketCaptureManager.computeDetectionOverlap(existing, cand)
         const sameTarget =
           existing.targetId === cand.targetId ||
           existing.title.trim().toLowerCase() === cand.title.trim().toLowerCase()
-        const overlapMetric = sameTarget ? Math.max(iou, iom) : iou
+        if (!sameTarget) continue
+        const existingArea = Math.max(1, (existing.x2 - existing.x1) * (existing.y2 - existing.y1))
+        const { iou, iom } = PocketCaptureManager.computeDetectionOverlap(existing, cand)
+        const overlapMetric = Math.max(iou, iom)
         if (overlapMetric >= safeThreshold) {
           // If cand is strictly enclosed inside an outer same-target box, prefer the tighter inner box
-          if (sameTarget && iom >= 0.75 && candArea < existingArea * 0.85) {
+          if (iom >= 0.75 && candArea < existingArea * 0.85) {
             kept[j] = cand
           }
           suppressed = true
