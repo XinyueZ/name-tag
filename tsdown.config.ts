@@ -67,6 +67,7 @@ export default defineConfig([
     },
     outputOptions: {
       entryFileNames: 'client.js',
+      codeSplitting: false,
       banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => {\n`,
       footer: '\nreturn module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',

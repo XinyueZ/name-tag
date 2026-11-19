@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DEFAULT_MATCH_THRESHOLD, type BoundingBox, type GranularityFilterResult, type GranularityParams, type ModelStatusResponse, type RecognizedDetection, type VectorTableRow } from '../../invariant'
+import { DEFAULT_MATCH_THRESHOLD, DEFAULT_SCOPE_CONFIDENCE_THRESHOLD, type BoundingBox, type GranularityFilterResult, type GranularityParams, type ModelStatusResponse, type RecognizedDetection, type VectorTableRow } from '../../invariant'
 import { CameraController, type CameraDeviceOption } from '../core/CameraController'
 import { CutoutAugmenter, type CutoutPreviewItem } from '../core/CutoutAugmenter'
 import { FastSamInferenceEngine, type ExecutionProviderKind } from '../core/FastSamInferenceEngine'
@@ -14,6 +14,7 @@ import { PreferencesStore } from '../core/PreferencesStore'
 import { CameraScopeCollection, type CameraScopeAddStatus } from '../core/CameraScopeModels'
 import { GranularitySettings, SavedPresetItem } from '../core/SavedPresetModels'
 import { ThemeService } from '../core/ThemeService'
+import { SemanticScopeFilter } from '../core/SemanticScopeFilter'
 import { CameraControlStrip } from './CameraControlStrip'
 import { CameraViewport } from './CameraViewport'
 import { GranularityCard } from './GranularityCard'
@@ -43,6 +44,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const embedLoadPromiseRef = useRef<Promise<boolean> | null>(null)
   const vectorRepoRef = useRef<BrowserTargetVectorRepository | null>(null)
   const trackerRef = useRef<ObjectCropTracker | null>(null)
+  const semanticFilterRef = useRef<SemanticScopeFilter | null>(null)
+  const negativeTextVecsRef = useRef<readonly (readonly number[])[] | null>(null)
   const modelLoadPromiseRef = useRef<Promise<boolean> | null>(null)
 
   if (cameraRef.current === null) cameraRef.current = new CameraController()
@@ -58,6 +61,9 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   }
   if (trackerRef.current === null) {
     trackerRef.current = new ObjectCropTracker()
+  }
+  if (semanticFilterRef.current === null) {
+    semanticFilterRef.current = new SemanticScopeFilter()
   }
 
   const [isDark, setIsDark] = useState<boolean>(() => ThemeService.isDarkTheme())
@@ -84,6 +90,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const [embedPct, setEmbedPct] = useState<number>(0)
   const [embedEp, setEmbedEp] = useState<'webgpu' | 'wasm'>('wasm')
   const [embedError, setEmbedError] = useState<string>('')
+  const [scopeProtoReady, setScopeProtoReady] = useState<boolean>(false)
+  const [scopeTick, setScopeTick] = useState<number>(0)
   const [vectorStats, setVectorStats] = useState<{ readonly totalTargets: number; readonly totalVectors: number }>({
     totalTargets: 0,
     totalVectors: 0,
@@ -101,6 +109,9 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const [scopeCollection, setScopeCollection] = useState<CameraScopeCollection>(() => {
     return prefStoreRef.current?.loadLocal()?.cameraScopes ?? CameraScopeCollection.createDefault()
   })
+  const [scopeConfidenceThreshold, setScopeConfidenceThreshold] = useState<number>(() => {
+    return prefStoreRef.current?.loadLocal()?.scopeConfidenceThreshold ?? DEFAULT_SCOPE_CONFIDENCE_THRESHOLD
+  })
   const [showProbLabels, setShowProbLabels] = useState<boolean>(false)
   const [rawBoxes, setRawBoxes] = useState<readonly BoundingBox[]>([])
   const [inferMs, setInferMs] = useState<number>(0)
@@ -110,12 +121,16 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const [dbLoading, setDbLoading] = useState<boolean>(false)
   const [dbError, setDbError] = useState<string | null>(null)
   const [dbRows, setDbRows] = useState<readonly VectorTableRow[]>([])
-  const [matchThreshold, setMatchThreshold] = useState<number>(DEFAULT_MATCH_THRESHOLD)
+  const [matchThreshold, setMatchThreshold] = useState<number>(() => {
+    return prefStoreRef.current?.loadLocal()?.matchThreshold ?? DEFAULT_MATCH_THRESHOLD
+  })
   const [pocketItems, setPocketItems] = useState<readonly PocketItem[]>([])
   const [pocketOpen, setPocketOpen] = useState<boolean>(false)
   const [matchError, setMatchError] = useState<string | null>(null)
   const [recognizedDetections, setRecognizedDetections] = useState<readonly RecognizedDetection[]>([])
+  const granularityKeptRef = useRef<readonly BoundingBox[]>([])
   const keptRef = useRef<readonly BoundingBox[]>([])
+  const scopeConfidenceThresholdRef = useRef<number>(scopeConfidenceThreshold)
   const matchThresholdRef = useRef<number>(matchThreshold)
 
   const locale = useMemo(() => new LocaleService(props.t), [props.t])
@@ -232,6 +247,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     return task
   }, [])
 
+
   const handleUploadLocalOnnx = useCallback(async (file: File) => {
     const engine = engineRef.current
     const cacheStore = cacheStoreRef.current
@@ -253,6 +269,9 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
 
   const handleClearCache = useCallback(async () => {
     trackerRef.current?.reset()
+    semanticFilterRef.current?.reset(null)
+    negativeTextVecsRef.current = null
+    setScopeProtoReady(false)
     setRecognizedDetections([])
     await cacheStoreRef.current?.clearIndexedDb()
     await engineRef.current?.dispose()
@@ -272,6 +291,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     setVectorStats({ totalTargets: 0, totalVectors: 0 })
     setSavedPresets([])
     setScopeCollection(CameraScopeCollection.createDefault())
+    setScopeConfidenceThreshold(DEFAULT_SCOPE_CONFIDENCE_THRESHOLD)
     setGranularity(GranularityFilter.fromPreset('coarse', false))
     setGranularityCollapsed(false)
     setMatchThreshold(DEFAULT_MATCH_THRESHOLD)
@@ -316,6 +336,8 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
   const stopCamera = useCallback(() => {
     cameraRef.current?.stop(videoRef.current)
     trackerRef.current?.reset()
+    semanticFilterRef.current?.reset(null)
+    setScopeProtoReady(false)
     setCameraActive(false)
     setRawBoxes([])
     setRecognizedDetections([])
@@ -399,22 +421,257 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     }
   }, [])
 
-  const filterResult: GranularityFilterResult = useMemo(() => {
+  const selectedScope = useMemo(() => {
+    return scopeCollection.getSelectedItem({
+      all: locale.translate('scope.all'),
+      humanFace: locale.translate('scope.humanFace'),
+    })
+  }, [locale, scopeCollection])
+
+  const activeScopeKey = selectedScope.isAll ? null : (selectedScope.id + ':' + selectedScope.text)
+
+  useEffect(() => {
+    semanticFilterRef.current?.reset(activeScopeKey)
+    setScopeProtoReady(false)
+    setScopeTick((t) => t + 1)
+    trackerRef.current?.reset()
+    setRecognizedDetections([])
+  }, [activeScopeKey])
+
+  // Encode positive/negative text prototypes + optional few-shot visual centroid once per scope change
+  useEffect(() => {
+    if (activeScopeKey === null || embedPhase !== 'ready') {
+      setScopeProtoReady(false)
+      return
+    }
+    const embedEngine = embedEngineRef.current
+    const semanticFilter = semanticFilterRef.current
+    const vectorRepo = vectorRepoRef.current
+    if (!embedEngine || !embedEngine.isReady() || !semanticFilter) return
+
+    let cancelled = false
+    const buildPrototype = async (): Promise<void> => {
+      try {
+        let negVecs = negativeTextVecsRef.current
+        if (negVecs === null) {
+          const builtNegs: number[][] = []
+          for (let i = 0; i < SemanticScopeFilter.NEGATIVE_PROMPTS.length; i += 1) {
+            builtNegs.push(await embedEngine.embedText(SemanticScopeFilter.NEGATIVE_PROMPTS[i]))
+          }
+          if (cancelled) return
+          negativeTextVecsRef.current = builtNegs
+          negVecs = builtNegs
+        }
+
+        const posPrompts = SemanticScopeFilter.buildPositivePrompts(selectedScope.id, selectedScope.text)
+        const posVecs: number[][] = []
+        for (let i = 0; i < posPrompts.length; i += 1) {
+          posVecs.push(await embedEngine.embedText(posPrompts[i]))
+        }
+        if (cancelled) return
+        const positiveTextCentroid = SemanticScopeFilter.computeCentroid(posVecs)
+        if (positiveTextCentroid === null) return
+
+        let visualCentroid: number[] | null = null
+        if (vectorRepo && vectorStats.totalVectors > 0) {
+          const visualVecs = await vectorRepo.getVectorsByTitle(selectedScope.text)
+          if (!cancelled && visualVecs.length > 0) {
+            visualCentroid = SemanticScopeFilter.computeCentroid(visualVecs)
+          }
+        }
+        if (cancelled) return
+        semanticFilter.setPrototype({
+          scopeKey: activeScopeKey,
+          positiveTextCentroid,
+          negativeTextVectors: negVecs,
+          visualCentroid,
+        })
+        setScopeProtoReady(true)
+        setScopeTick((t) => t + 1)
+      } catch {
+        if (!cancelled) setScopeProtoReady(false)
+      }
+    }
+
+    void buildPrototype()
+    return () => { cancelled = true }
+  }, [activeScopeKey, embedPhase, selectedScope.id, selectedScope.text, vectorStats.totalVectors])
+
+  // Layer 1 (Bottom): FastSAM-s granularity filter — always preserved
+  const granularityResult: GranularityFilterResult = useMemo(() => {
     const fw = resolution.w > 0 ? resolution.w : 1280
     const fh = resolution.h > 0 ? resolution.h : 720
     return GranularityFilter.filterBoxes(rawBoxes, fw, fh, granularity)
   }, [rawBoxes, resolution.w, resolution.h, granularity])
 
-  keptRef.current = filterResult.kept
+  granularityKeptRef.current = granularityResult.kept
+  scopeConfidenceThresholdRef.current = scopeConfidenceThreshold
   matchThresholdRef.current = matchThreshold
 
+  // Layer 2 (Top): Update SemanticScopeFilter track state on every FastSAM-s frame when non-'All'
+  useEffect(() => {
+    if (selectedScope.isAll) return
+    const semanticFilter = semanticFilterRef.current
+    if (!semanticFilter) return
+    if (!cameraActive || modelPhase !== 'ready' || tagModalItems !== null || dbModalOpen) return
+
+    const video = videoRef.current
+    const fw = resolution.w > 0 ? resolution.w : 1280
+    const fh = resolution.h > 0 ? resolution.h : 720
+    if (granularityResult.kept.length === 0) {
+      semanticFilter.updateFrame(null, [], fw, fh, Date.now())
+      setRecognizedDetections([])
+      setScopeTick((t) => t + 1)
+      return
+    }
+    const frameCanvas = video && video.readyState >= 2 && video.videoWidth > 0
+      ? CutoutAugmenter.captureVideoFrame(video)
+      : null
+    semanticFilter.updateFrame(
+      frameCanvas,
+      granularityResult.kept,
+      frameCanvas ? frameCanvas.width : fw,
+      frameCanvas ? frameCanvas.height : fh,
+      Date.now(),
+    )
+    setRecognizedDetections(
+      semanticFilter.getRecognizedDetections(granularityResult.kept, scopeConfidenceThresholdRef.current),
+    )
+    setScopeTick((t) => t + 1)
+  }, [cameraActive, dbModalOpen, granularityResult, modelPhase, resolution.h, resolution.w, selectedScope.isAll, tagModalItems])
+
+  // Layer 2 Async Embedding Loop (One Vector, Two Uses: scope filter + Pocket matching)
+  useEffect(() => {
+    if (
+      !cameraActive ||
+      activeScopeKey === null ||
+      modelPhase !== 'ready' ||
+      embedPhase !== 'ready' ||
+      !scopeProtoReady ||
+      tagModalItems !== null ||
+      dbModalOpen
+    ) {
+      return
+    }
+    let cancelled = false
+    let timerId: number | null = null
+
+    const querySemanticTracks = async (): Promise<void> => {
+      if (cancelled) return
+      const semanticFilter = semanticFilterRef.current
+      const langChainEmbeddings = embedLangChainRef.current
+      const vectorRepo = vectorRepoRef.current
+
+      if (semanticFilter && langChainEmbeddings) {
+        const dueTracks = semanticFilter.collectDueTracks(Date.now())
+        if (dueTracks.length > 0) {
+          try {
+            const vectors = await langChainEmbeddings.embedImages(dueTracks.map((t) => t.queryCutoutUrl))
+            if (!cancelled && vectors.length > 0) {
+              const nowTs = Date.now()
+              const passedForPocket: { readonly track: (typeof dueTracks)[number]; readonly vector: readonly number[] }[] = []
+              for (let i = 0; i < dueTracks.length; i += 1) {
+                const vec = vectors[i]
+                if (!vec || vec.length === 0) continue
+                const score = semanticFilter.applyEmbeddingResult(dueTracks[i].trackId, vec, nowTs, activeScopeKey)
+                if (score !== null && score >= scopeConfidenceThresholdRef.current) {
+                  passedForPocket.push({ track: dueTracks[i], vector: vec })
+                }
+              }
+              // Reuse the exact same 768-d vectors for downstream Pocket matching (only for filtered tracks!)
+              if (vectorRepo && vectorStats.totalVectors > 0 && passedForPocket.length > 0) {
+                const searchRes = await vectorRepo.searchMatches(
+                  passedForPocket.map((p) => p.vector),
+                  matchThresholdRef.current,
+                )
+                if (!cancelled) {
+                  setMatchError(null)
+                  const matchedItems: PocketItem[] = []
+                  for (let i = 0; i < searchRes.results.length; i += 1) {
+                    const hit = searchRes.results[i]
+                    const entry = passedForPocket[hit.index]
+                    if (!entry) continue
+                    const resolvedTitle = typeof hit.title === 'string' ? hit.title.trim() : ''
+                    const isHit = hit.matched && hit.targetId !== null && resolvedTitle.length > 0
+                    semanticFilter.applyPocketMatchResult(
+                      entry.track.trackId,
+                      isHit,
+                      isHit ? hit.targetId : null,
+                      isHit ? resolvedTitle : null,
+                      nowTs,
+                    )
+                    if (isHit) {
+                      matchedItems.push({
+                        targetId: hit.targetId as string,
+                        title: resolvedTitle,
+                        dataUrl: entry.track.rawPocketUrl,
+                        capturedAt: nowTs,
+                      })
+                    }
+                  }
+                  if (matchedItems.length > 0) {
+                    setPocketItems((prev) => PocketCaptureManager.mergeMatches(prev, matchedItems))
+                    setPocketOpen(true)
+                  }
+                }
+              }
+              if (!cancelled) {
+                setRecognizedDetections(
+                  semanticFilter.getRecognizedDetections(granularityKeptRef.current, scopeConfidenceThresholdRef.current),
+                )
+                setScopeTick((t) => t + 1)
+              }
+            }
+          } catch (err: unknown) {
+            if (!cancelled) {
+              setMatchError(err instanceof Error ? err.message : String(err))
+            }
+          }
+        }
+      }
+
+      if (!cancelled) {
+        timerId = window.setTimeout(() => {
+          void querySemanticTracks()
+        }, 200)
+      }
+    }
+
+    timerId = window.setTimeout(() => {
+      void querySemanticTracks()
+    }, 120)
+
+    return () => {
+      cancelled = true
+      if (timerId !== null) window.clearTimeout(timerId)
+    }
+  }, [activeScopeKey, cameraActive, dbModalOpen, embedPhase, modelPhase, scopeProtoReady, tagModalItems, vectorStats.totalVectors])
+
+  const effectiveFilterResult: GranularityFilterResult = useMemo(() => {
+    if (selectedScope.isAll) {
+      return granularityResult
+    }
+    const scopedKept = semanticFilterRef.current?.getFilteredBoxes(
+      granularityResult.kept,
+      scopeConfidenceThreshold,
+    ) ?? []
+    return {
+      kept: scopedKept,
+      suppressed: [],
+      durationMs: granularityResult.durationMs,
+    }
+  }, [granularityResult, scopeConfidenceThreshold, selectedScope.isAll, scopeTick])
+
+  keptRef.current = effectiveFilterResult.kept
+
   const trackedRecognizedDetections = useMemo(
-    () => PocketCaptureManager.trackRecognizedBoxes(recognizedDetections, filterResult.kept),
-    [recognizedDetections, filterResult.kept],
+    () => PocketCaptureManager.trackRecognizedBoxes(recognizedDetections, effectiveFilterResult.kept),
+    [recognizedDetections, effectiveFilterResult.kept],
   )
 
-  // Update multi-frame ObjectCropTracker on every filtered FastSAM-s frame to buffer the sharpest crops
+  // 'All' mode: 100% original ObjectCropTracker flow
   useEffect(() => {
+    if (!selectedScope.isAll) return
     const tracker = trackerRef.current
     if (!tracker) return
     if (!cameraActive || modelPhase !== 'ready' || tagModalItems !== null || dbModalOpen) return
@@ -422,7 +679,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     const video = videoRef.current
     const fw = resolution.w > 0 ? resolution.w : 1280
     const fh = resolution.h > 0 ? resolution.h : 720
-    if (filterResult.kept.length === 0) {
+    if (granularityResult.kept.length === 0) {
       tracker.updateFrame(null, [], fw, fh, Date.now())
       if (recognizedDetections.length > 0) setRecognizedDetections([])
       return
@@ -433,13 +690,14 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     }
 
     const frameCanvas = CutoutAugmenter.captureVideoFrame(video)
-    tracker.updateFrame(frameCanvas, filterResult.kept, frameCanvas.width, frameCanvas.height, Date.now())
-    setRecognizedDetections(tracker.getRecognizedDetections(filterResult.kept))
-  }, [cameraActive, dbModalOpen, filterResult, modelPhase, resolution.h, resolution.w, tagModalItems, vectorStats.totalVectors])
+    tracker.updateFrame(frameCanvas, granularityResult.kept, frameCanvas.width, frameCanvas.height, Date.now())
+    setRecognizedDetections(tracker.getRecognizedDetections(granularityResult.kept))
+  }, [cameraActive, dbModalOpen, granularityResult, modelPhase, resolution.h, resolution.w, selectedScope.isAll, tagModalItems, vectorStats.totalVectors])
 
-  // Query due stable tracks using their buffered sharpest crops (detect.py cadence)
+  // 'All' mode: 100% original Pocket query loop
   useEffect(() => {
     if (
+      !selectedScope.isAll ||
       !cameraActive ||
       modelPhase !== 'ready' ||
       embedPhase !== 'ready' ||
@@ -524,7 +782,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
       cancelled = true
       if (timerId !== null) window.clearTimeout(timerId)
     }
-  }, [cameraActive, dbModalOpen, embedPhase, modelPhase, tagModalItems, vectorStats.totalVectors])
+  }, [cameraActive, dbModalOpen, embedPhase, modelPhase, selectedScope.isAll, tagModalItems, vectorStats.totalVectors])
 
   const modelMessage = useMemo(() => {
     if (modelPhase === 'idle') return locale.translate('model.idle')
@@ -556,6 +814,25 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     if (embedPhase === 'ready') return locale.translate('embed.ready', { ep: embedEp.toUpperCase() })
     return locale.translate('embed.error', { message: embedError })
   }, [embedEp, embedError, embedPct, embedPhase, locale])
+
+  const scopeFilterBadge = useMemo((): string | null => {
+    if (!cameraActive || selectedScope.isAll) return null
+    if (embedPhase !== 'ready') {
+      return locale.translate('scope.hudLoading', { scope: selectedScope.text })
+    }
+    if (!scopeProtoReady) {
+      return locale.translate('scope.hudScanning', { scope: selectedScope.text })
+    }
+    if (effectiveFilterResult.kept.length > 0) {
+      const bestScore = semanticFilterRef.current?.getBestScore(effectiveFilterResult.kept) ?? 0
+      return locale.translate('scope.hudMatched', {
+        scope: selectedScope.text,
+        count: effectiveFilterResult.kept.length,
+        pct: Math.round(bestScore * 100),
+      })
+    }
+    return locale.translate('scope.hudNotFound', { scope: selectedScope.text })
+  }, [cameraActive, effectiveFilterResult.kept, embedPhase, locale, scopeProtoReady, selectedScope.isAll, selectedScope.text])
 
   const loadDatabaseEntries = useCallback(async (): Promise<void> => {
     const vectorRepo = vectorRepoRef.current
@@ -614,6 +891,24 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     setTagModalItems(null)
   }, [embedError, ensureEmbeddingReady, tagModalItems])
 
+  const persistWorkspace = useCallback((overrides: {
+    readonly granularity?: GranularityParams
+    readonly granularityCardCollapsed?: boolean
+    readonly savedPresets?: readonly SavedPresetItem[]
+    readonly cameraScopes?: CameraScopeCollection
+    readonly scopeConfidenceThreshold?: number
+    readonly matchThreshold?: number
+  }) => {
+    prefStoreRef.current?.saveWorkspace({
+      granularity: overrides.granularity ?? granularity,
+      granularityCardCollapsed: overrides.granularityCardCollapsed ?? granularityCollapsed,
+      savedPresets: overrides.savedPresets ?? savedPresets,
+      cameraScopes: overrides.cameraScopes ?? scopeCollection,
+      scopeConfidenceThreshold: overrides.scopeConfidenceThreshold ?? scopeConfidenceThreshold,
+      matchThreshold: overrides.matchThreshold ?? matchThreshold,
+    })
+  }, [granularity, granularityCollapsed, matchThreshold, savedPresets, scopeCollection, scopeConfidenceThreshold])
+
   const handleAddScope = useCallback((text: string): CameraScopeAddStatus => {
     const labels = {
       all: locale.translate('scope.all'),
@@ -622,26 +917,16 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     const result = scopeCollection.addItem(text, labels)
     if (result.status === 'added') {
       setScopeCollection(result.collection)
-      prefStoreRef.current?.saveWorkspace({
-        granularity,
-        granularityCardCollapsed: granularityCollapsed,
-        savedPresets,
-        cameraScopes: result.collection,
-      })
+      persistWorkspace({ cameraScopes: result.collection })
     }
     return result.status
-  }, [granularity, granularityCollapsed, locale, savedPresets, scopeCollection])
+  }, [locale, persistWorkspace, scopeCollection])
 
   const handleSelectScope = useCallback((id: string) => {
     const next = scopeCollection.selectItem(id)
     setScopeCollection(next)
-    prefStoreRef.current?.saveWorkspace({
-      granularity,
-      granularityCardCollapsed: granularityCollapsed,
-      savedPresets,
-      cameraScopes: next,
-    })
-  }, [granularity, granularityCollapsed, savedPresets, scopeCollection])
+    persistWorkspace({ cameraScopes: next })
+  }, [persistWorkspace, scopeCollection])
 
   const handleRenameScope = useCallback((id: string, nextText: string) => {
     const labels = {
@@ -650,24 +935,24 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
     }
     const next = scopeCollection.renameItem(id, nextText, labels)
     setScopeCollection(next)
-    prefStoreRef.current?.saveWorkspace({
-      granularity,
-      granularityCardCollapsed: granularityCollapsed,
-      savedPresets,
-      cameraScopes: next,
-    })
-  }, [granularity, granularityCollapsed, locale, savedPresets, scopeCollection])
+    persistWorkspace({ cameraScopes: next })
+  }, [locale, persistWorkspace, scopeCollection])
 
   const handleDeleteScope = useCallback((id: string) => {
     const next = scopeCollection.removeItem(id)
     setScopeCollection(next)
-    prefStoreRef.current?.saveWorkspace({
-      granularity,
-      granularityCardCollapsed: granularityCollapsed,
-      savedPresets,
-      cameraScopes: next,
-    })
-  }, [granularity, granularityCollapsed, savedPresets, scopeCollection])
+    persistWorkspace({ cameraScopes: next })
+  }, [persistWorkspace, scopeCollection])
+
+  const handleScopeConfidenceThresholdChange = useCallback((nextVal: number) => {
+    setScopeConfidenceThreshold(nextVal)
+    persistWorkspace({ scopeConfidenceThreshold: nextVal })
+  }, [persistWorkspace])
+
+  const handleMatchThresholdChange = useCallback((nextVal: number) => {
+    setMatchThreshold(nextVal)
+    persistWorkspace({ matchThreshold: nextVal })
+  }, [persistWorkspace])
 
   const fullscreenBtnLabel = locale.translate(
     isFullscreen ? 'workspace.exitFullscreen' : 'workspace.enterFullscreen',
@@ -725,14 +1010,17 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
             cameraError={cameraError}
             mirror={mirror}
             resolution={resolution}
-            filterResult={filterResult}
-            showSuppressed={granularity.showSuppressed}
+            filterResult={effectiveFilterResult}
+            showSuppressed={selectedScope.isAll ? granularity.showSuppressed : false}
             showProbLabels={showProbLabels}
             recognizedDetections={trackedRecognizedDetections}
             modelStatusBadge={modelMessage}
             fps={fps}
             locale={locale}
             scopeCollection={scopeCollection}
+            scopeConfidenceThreshold={scopeConfidenceThreshold}
+            scopeFilterBadge={scopeFilterBadge}
+            onScopeConfidenceThresholdChange={handleScopeConfidenceThresholdChange}
             onAddScope={handleAddScope}
             onSelectScope={handleSelectScope}
             onRenameScope={handleRenameScope}
@@ -770,7 +1058,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
             matchThreshold={matchThreshold}
             matchError={matchError}
             onOpenPocket={() => setPocketOpen(true)}
-            onMatchThresholdChange={(val) => setMatchThreshold(val)}
+            onMatchThresholdChange={handleMatchThresholdChange}
             locale={locale}
             onToggleCamera={handleToggleCamera}
             onToggleMirror={() => setMirror((m) => !m)}
@@ -787,9 +1075,9 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
             collapsed={granularityCollapsed}
             showProbLabels={showProbLabels}
             savedPresets={savedPresets}
-            keptCount={filterResult.kept.length}
-            suppressedCount={filterResult.suppressed.length}
-            filterMs={filterResult.durationMs}
+            keptCount={effectiveFilterResult.kept.length}
+            suppressedCount={granularityResult.suppressed.length}
+            filterMs={granularityResult.durationMs}
             inferMs={inferMs}
             fps={fps}
             locale={locale}
@@ -797,12 +1085,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
               const unselected = savedPresets.map((item) => item.withSelected(false))
               setGranularity(nextParams)
               setSavedPresets(unselected)
-              prefStoreRef.current?.saveWorkspace({
-                granularity: nextParams,
-                granularityCardCollapsed: granularityCollapsed,
-                savedPresets: unselected,
-                cameraScopes: scopeCollection,
-              })
+              persistWorkspace({ granularity: nextParams, savedPresets: unselected })
             }}
             onToggleProbLabels={() => setShowProbLabels((prev) => !prev)}
             onSavePreset={() => {
@@ -818,12 +1101,7 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
               })
               const nextSaved = [...savedPresets.map((item) => item.withSelected(false)), entry]
               setSavedPresets(nextSaved)
-              prefStoreRef.current?.saveWorkspace({
-                granularity,
-                granularityCardCollapsed: granularityCollapsed,
-                savedPresets: nextSaved,
-                cameraScopes: scopeCollection,
-              })
+              persistWorkspace({ savedPresets: nextSaved })
             }}
             onSelectSavedPreset={(presetId) => {
               const found = savedPresets.find((item) => item.id === presetId)
@@ -832,43 +1110,23 @@ export function NameTagWorkspace(props: NameTagWorkspaceProps): React.JSX.Elemen
               const nextParams = found.settings.toParams()
               setSavedPresets(nextSaved)
               setGranularity(nextParams)
-              prefStoreRef.current?.saveWorkspace({
-                granularity: nextParams,
-                granularityCardCollapsed: granularityCollapsed,
-                savedPresets: nextSaved,
-                cameraScopes: scopeCollection,
-              })
+              persistWorkspace({ granularity: nextParams, savedPresets: nextSaved })
             }}
             onRenameSavedPreset={(presetId, nextText) => {
               // Editing text keeps item.selected completely unchanged
               const nextSaved = savedPresets.map((item) => (item.id === presetId ? item.withText(nextText) : item))
               setSavedPresets(nextSaved)
-              prefStoreRef.current?.saveWorkspace({
-                granularity,
-                granularityCardCollapsed: granularityCollapsed,
-                savedPresets: nextSaved,
-                cameraScopes: scopeCollection,
-              })
+              persistWorkspace({ savedPresets: nextSaved })
             }}
             onDeleteSavedPreset={(presetId) => {
               const nextSaved = savedPresets.filter((item) => item.id !== presetId)
               setSavedPresets(nextSaved)
-              prefStoreRef.current?.saveWorkspace({
-                granularity,
-                granularityCardCollapsed: granularityCollapsed,
-                savedPresets: nextSaved,
-                cameraScopes: scopeCollection,
-              })
+              persistWorkspace({ savedPresets: nextSaved })
             }}
             onToggleCollapse={() => {
               setGranularityCollapsed((prev) => {
                 const nextCollapsed = !prev
-                prefStoreRef.current?.saveWorkspace({
-                  granularity,
-                  granularityCardCollapsed: nextCollapsed,
-                  savedPresets,
-                  cameraScopes: scopeCollection,
-                })
+                persistWorkspace({ granularityCardCollapsed: nextCollapsed })
                 return nextCollapsed
               })
             }}

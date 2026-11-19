@@ -419,6 +419,22 @@ export class BrowserTargetVectorRepository {
     }
   }
 
+  public async getVectorsByTitle(query: string): Promise<number[][]> {
+    const norm = query.trim().toLowerCase()
+    if (norm.length === 0) return []
+    const records = await this.store.getAllRecords()
+    const matched: number[][] = []
+    for (let i = 0; i < records.length; i += 1) {
+      const rec = records[i]
+      const title = typeof rec.metadata?.title === 'string' ? rec.metadata.title.trim().toLowerCase() : ''
+      if (title.length === 0) continue
+      if (title === norm || title.includes(norm) || norm.includes(title)) {
+        matched.push(rec.vector.slice())
+      }
+    }
+    return matched
+  }
+
   public async clearAll(): Promise<void> {
     await this.store.delete({ deleteAll: true })
   }

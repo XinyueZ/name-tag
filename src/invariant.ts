@@ -16,6 +16,7 @@ export const FASTSAM_REMOTE_URL =
 export const EMBEDDING_MODEL_ID = 'onnx-community/embeddinggemma-2-ONNX'
 export const EMBEDDING_DIM = 768
 export const DEFAULT_MATCH_THRESHOLD = 0.78
+export const DEFAULT_SCOPE_CONFIDENCE_THRESHOLD = 0.50
 
 export const ORT_ASSET_FILES = [
   'ort-wasm-simd-threaded.wasm',
@@ -63,6 +64,8 @@ export interface NameTagPreferences {
   readonly granularityCardCollapsed?: boolean
   readonly savedPresets?: readonly SavedGranularityPreset[]
   readonly cameraScopes?: CameraScopeStateData
+  readonly scopeConfidenceThreshold?: number
+  readonly matchThreshold?: number
 }
 
 export interface BoundingBox {

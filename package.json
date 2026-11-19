@@ -37,9 +37,9 @@
     "watch": "tsdown --watch"
   },
   "dependencies": {
-    "onnxruntime-web": "^1.21.0",
     "@huggingface/transformers": "^4.0.0",
-    "@langchain/core": "^1.0.0"
+    "@langchain/core": "^1.0.0",
+    "onnxruntime-web": "^1.21.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=3.0.0"

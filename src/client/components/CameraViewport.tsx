@@ -20,6 +20,9 @@ export interface CameraViewportProps {
   readonly fps: number
   readonly locale: LocaleService
   readonly scopeCollection: CameraScopeCollection
+  readonly scopeConfidenceThreshold: number
+  readonly scopeFilterBadge?: string | null
+  readonly onScopeConfidenceThresholdChange: (value: number) => void
   readonly onAddScope: (text: string) => CameraScopeAddStatus
   readonly onSelectScope: (id: string) => void
   readonly onRenameScope: (id: string, nextText: string) => void
@@ -448,6 +451,8 @@ export function CameraViewport(props: CameraViewportProps): React.JSX.Element {
           <CameraScopeDropdown
             collection={props.scopeCollection}
             cameraActive={props.cameraActive}
+            scopeConfidenceThreshold={props.scopeConfidenceThreshold}
+            onScopeConfidenceThresholdChange={props.onScopeConfidenceThresholdChange}
             locale={props.locale}
             onAdd={props.onAddScope}
             onSelect={props.onSelectScope}
@@ -457,6 +462,9 @@ export function CameraViewport(props: CameraViewportProps): React.JSX.Element {
           <span className="nt-hud-chip">{props.locale.translate('camera.title')}</span>
         </div>
         <div className="nt-camera-hud-right">
+          {props.scopeFilterBadge ? (
+            <span className="nt-hud-chip nt-hud-chip-scope">{props.scopeFilterBadge}</span>
+          ) : null}
           <span className="nt-hud-chip">{props.modelStatusBadge}</span>
           {props.cameraActive && props.filterResult.kept.length > 0 ? (
             <span className="nt-hud-chip">{props.locale.translate('camera.clickHint')}</span>

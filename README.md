@@ -16,7 +16,8 @@ A dedicated, permanent **DeepSeek Harness (DSH) Web** plugin for **100% client-s
 | [2. Global Installation on DSH Web](#en-install) | [2. 在 DSH Web 上的全局安装（永久挂载）](#zh-install) |
 | [3. Models & Frameworks (Design Rationale)](#en-models) | [3. 模型与框架选型说明（为什么这样选）](#zh-models) |
 | [4. Core Workflow & Logic](#en-workflow) | [4. 核心逻辑与双阶段闭环流程](#zh-workflow) |
-| [5. UI Elements Reference](#en-ui) | [5. 界面各元素功能详解](#zh-ui) |
+| [5. Post-Segmentation Semantic Filter & Trade-offs](#en-filter) | [5. 分割后的语义过滤层原理、实现与模型取舍](#zh-filter) |
+| [6. UI Elements Reference](#en-ui) | [6. 界面各元素功能详解](#zh-ui) |
 
 ---
 
@@ -29,7 +30,7 @@ To stay up to date with the latest architecture decisions, model contracts, deve
 
 - **[`.wiki/index.md`](./.wiki/index.md)** — Content catalog of all requirements sources and maintained knowledge pages (start here).
 - **[`.wiki/log.md`](./.wiki/log.md)** — Chronological append-only ledger of every feature, bug fix, and milestone.
-- **[`.wiki/wiki/`](./.wiki/wiki/architecture.md)** — Maintained synthesis pages covering [Architecture](./.wiki/wiki/architecture.md), [FastSAM-s Lazy-Load](./.wiki/wiki/model-lazyload-and-fastsam.md), [Granularity Engine](./.wiki/wiki/granularity-engine.md), [UI & Design System](./.wiki/wiki/ui-and-design-system.md), [Roadmap](./.wiki/wiki/progress-and-roadmap.md), and [Troubleshooting](./.wiki/wiki/troubleshooting.md).
+- **[`.wiki/wiki/`](./.wiki/wiki/architecture.md)** — Maintained synthesis pages covering [Architecture](./.wiki/wiki/architecture.md), [FastSAM-s Lazy-Load](./.wiki/wiki/model-lazyload-and-fastsam.md), [Granularity Engine](./.wiki/wiki/granularity-engine.md), [Semantic Filtering & Trade-offs](./.wiki/wiki/semantic-filtering-and-tradeoffs.md), [UI & Design System](./.wiki/wiki/ui-and-design-system.md), [Roadmap](./.wiki/wiki/progress-and-roadmap.md), and [Troubleshooting](./.wiki/wiki/troubleshooting.md).
 - **[`.wiki/raw/`](./.wiki/raw/001-project-inception-and-requirements.md)** — Immutable requirement snapshots.
 - **[`.wiki/AGENTS.md`](./.wiki/AGENTS.md)** & **[`AGENTS.md`](./AGENTS.md)** — Wiki maintenance schema and project-wide OOP/verification coding rules.
 
@@ -90,8 +91,38 @@ The application forms a clean **two-stage closed loop** on top of live class-agn
 
 ---
 
+<a id="en-filter"></a>
+### 5. Post-Segmentation Semantic Filter & Model Trade-offs
+
+![Post-Segmentation Semantic Filtering Pipeline](./assets/semantic-filter-pipeline.png)
+
+After **Layer 1 (`FastSAM-s` + `GranularityFilter`)** produces clean whole-object masks at ~20 FPS, Name Tag adds a real-time **Layer 2 (`SemanticScopeFilter`)** controlled by the top-left **`CameraScopeDropdown`** so users can focus exclusively on a chosen target (e.g., built-in **Human Face** or custom **labubu**) without losing real-time frame rate:
+
+#### How the Filter Works Today (`src/client/core/SemanticScopeFilter.ts`)
+1. **Zero-Overhead Bypass for `All`**: When **`All`** is selected (default), Layer 2 is completely bypassed—preserving 100% of the original behavior.
+2. **Shared 768-d Vision + Text Contrastive Scoring**: Rather than loading another model, `SemanticScopeFilter` reuses the already-loaded **`EmbeddingGemma 2`** (`onnx-community/embeddinggemma-2-ONNX`) shared 768-d space:
+   - On each scope switch (`< 20 ms`, once), positive prompts (`a photo of {target}`, `a close-up of {target}`, `{target}`) are averaged into a unit centroid $v_+$, paired with cached generic background/distractor vectors $\{v_-\}$.
+   - Because raw cross-modal cosine similarity lies in a narrow band (`~0.15–0.35`), each segment's image vector $v_{\text{img}}$ is scored by a temperature-scaled margin logistic function ($T = 0.05$): $\text{textProb} = 1 / (1 + \exp((\max_k(v_{\text{img}} \cdot v_{-,k}) - v_{\text{img}} \cdot v_+) / T))$, so an even margin maps cleanly to **`0.50`** on the dropdown's `0.00–1.00` slider.
+   - **Few-Shot Visual Fusion**: If the user has already tagged a matching title in their browser IndexedDB vector store (`BrowserTargetVectorRepository.getVectorsByTitle`), its visual centroid $v_{\text{vis}}$ is fused automatically via $\max(\text{textProb}, \text{clamp}_{0..1}(v_{\text{img}} \cdot v_{\text{vis}}))$—greatly boosting niche or IP targets like `labubu`.
+3. **Multi-Instance IoU Tracking & One-Vector-Two-Uses**: Every live FastSAM-s mask is tracked across frames via IoU (`STABLE_FRAMES = 2`, `REQUERY_MS = 2000`, sharpest crop selected by Laplacian variance) so multiple matching instances (e.g., 2 faces) track smoothly at 20 FPS. For every track that passes `score ≥ scopeConfidenceThreshold`, **the exact same 768-d `v_img` vector is forwarded directly to the Pocket vector DB search**—zero duplicate embedding inference. Unmatched objects are strictly blocked from canvas overlay, click-to-tag, and the Pocket.
+
+#### Why Not a Standalone Model Like Valen ([`Valen-Team/valen-sdk-js`](https://github.com/Valen-Team/valen-sdk-js))?
+We evaluated and prototyped running a dedicated client-side multimodal decision/grounding model—specifically **[Valen (`Valen-Team/valen-sdk-js`)](https://github.com/Valen-Team/valen-sdk-js)** (`Valen-Decision-1.5-0.8B-ONNX`, `web-portable` variant with [`#bbox-questions`](https://github.com/Valen-Team/valen-sdk-js#bbox-questions))—as the post-segmentation filter, and deliberately chose **`EmbeddingGemma 2` reuse** for real-time camera filtering:
+
+| Trade-off | Reusing `EmbeddingGemma 2` (`SemanticScopeFilter`) | Standalone 0.8B VLM ([`valen-sdk-js`](https://github.com/Valen-Team/valen-sdk-js)) |
+| :--- | :--- | :--- |
+| **Real-Time Latency** | **< 0.01 ms** dot-product per track (reuses Pocket embedding; full ~20 FPS camera) | **~2–4 s per call** on browser WebGPU—designed for System-1 reasoning, too slow for 20 FPS live gating |
+| **Model Footprint** | **0 MB extra** (reuses already-cached `EmbeddingGemma 2`) | **+2.46 GB** extra browser weights (including a 970 MiB FP32 embedding table) |
+| **Runtime Contention** | Isolated in `transformers.web.js` runtime—**zero FPS stall on `FastSAM-s`** | Shares `onnxruntime-web`'s single Emscripten Asyncify WebGPU/WASM stack with `FastSAM-s`, requiring mutual exclusion that stalls live segmentation |
+| **Multi-Instance** | **Native** (keeps all matching faces/objects in frame simultaneously) | Single primary `bbox` per question call |
+| **Custom / Niche IPs** | Zero-shot text + **automatic few-shot boost** once tagged in Vector DB | Strong open-world VLM reasoning, best suited to offline or low-frequency decision tasks |
+
+> Full architectural decision record (ADR) & comparison with ultra-light specialized detectors (BlazeFace / YOLO-World) are documented in [`.wiki/wiki/semantic-filtering-and-tradeoffs.md`](./.wiki/wiki/semantic-filtering-and-tradeoffs.md).
+
+---
+
 <a id="en-ui"></a>
-### 5. UI Elements Reference
+### 6. UI Elements Reference
 
 #### A. Top Bar & Split-Screen Layout
 - **`Name Tag` Tab**: Mounted at the far right of DSH Web's `conversation.view` tab strip (`order: 999`).
@@ -100,7 +131,8 @@ The application forms a clean **two-stage closed loop** on top of live class-agn
 
 #### B. Left Pane — Live Camera Viewport (`CameraViewport`)
 - **Video + High-DPI Segmentation Canvas**: Live camera stream (mirrored by default) overlaid with colored instance segmentation masks and crisp contours. Hovering highlights a segment; clicking opens **Target Tagging**. Once an object is recognized against the FAISS vector store, a classic CV **bounding box + `title` tag** is drawn directly around it (unaffected by the `Prob. Tags` switch).
-- **HUD Chips**: Shows viewport label, FastSAM-s status, click-to-tag hint, live resolution, and detection FPS.
+- **Top-Left Editable Scope Dropdown (`CameraScopeDropdown`)**: Anchored at the top-left of the camera frame with two locked built-in options (**`All`** and **`Human Face`**) plus unbounded user-added targets (press `Enter` continuously to add; custom items support inline `✎` rename and `×` delete). Includes an internal **`Filter Confidence`** slider (`0.00 ~ 1.00`, default **`0.50`**, persisted in `localStorage`) directly beneath the input, plus a warm golden-amber non-dismissible **Tips bubble** (appears for 5s on every camera start and repeats every 60s).
+- **HUD Chips**: Shows viewport label, active semantic scope filter status chip (matched count & peak score when non-`All`), FastSAM-s status, click-to-tag hint, live resolution, and detection FPS.
 
 #### C. Right Pane — Card 1: Camera, Models & Matching (`CameraControlStrip`)
 - **Primary Action Row**:
@@ -115,7 +147,7 @@ The application forms a clean **two-stage closed loop** on top of live class-agn
   - **`Clear Vector DB`**: Clears **only** the browser-local IndexedDB vector database (`dsh-name-tag-vectors`), preserving cached CV/embedding models and granularity presets.
   - **`Clear Cache`**: Wipes `FastSAM-s` IndexedDB cache, `EmbeddingGemma 2` Browser Cache (`transformers-cache`), saved granularity presets/preferences (`localStorage`), the browser vector database (`dsh-name-tag-vectors`), and the Pocket.
 - **Dual Model Status Banners**: Real-time lazy-load progress bars and execution backend badges (`WebGPU` / `WASM`) for both **FastSAM-s** and **EmbeddingGemma 2**.
-- **`Capture Match Similarity` Slider**: Session-only slider (`0.00 ~ 1.00`, **default `0.78`, never persisted** across sessions) with a **`Default`** reset button.
+- **`Capture Match Similarity` Slider**: Controls Pocket vector DB cosine similarity (`0.00 ~ 1.00`, **default `0.78`**, persisted in `localStorage` independently from the dropdown's `Filter Confidence` slider and reset on `Clear Cache`) with a **`Default`** reset button.
 - **`Client-Side Local Storage & Caches` (Collapsible, default closed)**: Expands to display the browser vector DB (`IndexedDB dsh-name-tag-vectors` + target/vector counts), `localStorage` preferences key, browser model caches, and the optional read-only Host model mirror path.
 
 #### D. Right Pane — Card 2: `"Granularity" Real-Time Control Panel` (`GranularityCard`)
@@ -140,7 +172,7 @@ The application forms a clean **two-stage closed loop** on top of live class-agn
 
 - **[`.wiki/index.md`](./.wiki/index.md)** —— 知识库总目录，按类别索引全部文档与一句话摘要（建议首选阅读）。
 - **[`.wiki/log.md`](./.wiki/log.md)** —— 按时间顺序追加的演进日志，记录每次构建、功能增量、架构决策与修复详情。
-- **[`.wiki/wiki/`](./.wiki/wiki/architecture.md)** —— 持续维护的专题知识页，涵盖 [系统架构](./.wiki/wiki/architecture.md)、[FastSAM-s 懒加载契约](./.wiki/wiki/model-lazyload-and-fastsam.md)、[颗粒度引擎](./.wiki/wiki/granularity-engine.md)、[UI 与设计规范](./.wiki/wiki/ui-and-design-system.md)、[进度与路线图](./.wiki/wiki/progress-and-roadmap.md) 以及 [常见故障排查](./.wiki/wiki/troubleshooting.md)。
+- **[`.wiki/wiki/`](./.wiki/wiki/architecture.md)** —— 持续维护的专题知识页，涵盖 [系统架构](./.wiki/wiki/architecture.md)、[FastSAM-s 懒加载契约](./.wiki/wiki/model-lazyload-and-fastsam.md)、[颗粒度引擎](./.wiki/wiki/granularity-engine.md)、[语义过滤层与模型取舍](./.wiki/wiki/semantic-filtering-and-tradeoffs.md)、[UI 与设计规范](./.wiki/wiki/ui-and-design-system.md)、[进度与路线图](./.wiki/wiki/progress-and-roadmap.md) 以及 [常见故障排查](./.wiki/wiki/troubleshooting.md)。
 - **[`.wiki/raw/`](./.wiki/raw/001-project-inception-and-requirements.md)** —— 不可变的原始需求与决策快照。
 - **[`.wiki/AGENTS.md`](./.wiki/AGENTS.md)** 与 **[`AGENTS.md`](./AGENTS.md)** —— Wiki 维护规范以及项目级 OOP / 测试门禁开发准则。
 
@@ -201,8 +233,38 @@ pnpm dsh web
 
 ---
 
+<a id="zh-filter"></a>
+### 5. 分割后的语义过滤层原理、实现与模型取舍
+
+![分割后双层过滤与一向量两用实时管线图](./assets/semantic-filter-pipeline.png)
+
+在 **底层（Layer 1：`FastSAM-s` + `GranularityFilter`）** 以约 20 FPS 稳定产出整物分割掩码的基础上，Name Tag 在其上方叠加了一层实时 **语义过滤层（Layer 2：`SemanticScopeFilter`）**，由镜头左上角的 **`CameraScopeDropdown`** 控制，实现“只保留你当前关心的目标（如内置的 **人脸** 或自定义的 **labubu**）”且不拖慢实时帧率：
+
+#### 当前原理与实现（`src/client/core/SemanticScopeFilter.ts`）
+1. **「所有 / All」零开销旁路**：默认选中 **「所有」** 时，直接 100% 跳过语义过滤层，与原有全量分割/捕捉行为完全一致。
+2. **复用 `EmbeddingGemma 2` 768 维图文同空间对比打分**：不引入任何额外模型，直接复用浏览器里已加载好的 **`EmbeddingGemma 2`**（Vision + Text 统一 768 维归一化空间）：
+   - 每次切换非「所有」选项时（仅算 1 次，`< 20 ms`），将正提示词模板（`a photo of {目标}`、`a close-up of {目标}`、`{目标}`）编码并 L2 平均为正质心 $v_+$，配合常驻内存的通用背景/杂物负提示词向量集合 $\{v_-\}$。
+   - 由于图-文跨模态裸余弦值通常集中在较窄区间（`~0.15–0.35`），系统使用带温度系数（$T = 0.05$）的正负间隔逻辑斯蒂函数将其映射到直观的 `0.00 ~ 1.00` 概率分：$\text{textProb} = 1 / (1 + \exp((\max_k(v_{\text{img}} \cdot v_{-,k}) - v_{\text{img}} \cdot v_+) / T))$——当正负相似度打平时恰好输出 **`0.50`**，与下拉框默认阈值完美契合。
+   - **Few-Shot 视觉原型自动融合**：如果用户已在本地向量库中标记过同名目标（`BrowserTargetVectorRepository.getVectorsByTitle`），过滤层会自动把这些视觉样本质心 $v_{\text{vis}}$ 融合进来（$\max(\text{textProb}, \text{clamp}_{0..1}(v_{\text{img}} \cdot v_{\text{vis}}))$），显著提升像 `labubu` 这类小众潮玩/特定 IP 的筛选准度。
+3. **多目标跨帧 IoU 追踪与「一向量两用」**：`SemanticScopeFilter` 为每个实时分割块维护 `trackId`（`STABLE_FRAMES = 2`、每 `2s` 复检，并用 Laplacian 方差缓冲最清晰抠图），移动中的多个同类目标（如多张人脸）都能以 20 FPS 平滑跟随。通过 `score ≥ scopeConfidenceThreshold` 过滤的物体，**直接把同一条 768 维图像向量送入下游「口袋」向量库检索**，实现零重复编码；未通过的目标被严格拦截，不会渲染到画布、不可点击标记、也不会进入「口袋」。
+
+#### 为什么不单独引入其他模型（如 [Valen (`Valen-Team/valen-sdk-js`)](https://github.com/Valen-Team/valen-sdk-js)）？
+在方案演进过程中，我们实测接入并评估过纯端侧多模态决策模型 **[Valen（`Valen-Team/valen-sdk-js`）](https://github.com/Valen-Team/valen-sdk-js)**（`Valen-Decision-1.5-0.8B-ONNX` `web-portable` 变体及其 [`#bbox-questions`](https://github.com/Valen-Team/valen-sdk-js#bbox-questions) 定位能力），最终放弃单独运行重型 VLM、选择**复用 `EmbeddingGemma 2`**，核心工程取舍如下：
+
+| 评估维度 | 当前方案：复用 `EmbeddingGemma 2`（`SemanticScopeFilter`） | 单独引入重型 VLM（如 [`valen-sdk-js`](https://github.com/Valen-Team/valen-sdk-js) 0.8B `bbox`） |
+| :--- | :--- | :--- |
+| **实时性 / 延迟** | 768 维点积耗时 **`< 0.01 ms`**（复用口袋向量，摄像头保持 ~20 FPS 满帧） | 浏览器 WebGPU 单次推理需 **2–4 秒**，本质是 System-1 慢决策模型，跟不上实时视频流 |
+| **额外模型体积** | **0 MB**（直接复用已缓存的 `EmbeddingGemma 2`） | **+2.46 GB** 额外下载与显存/内存开销（仅 FP32 词表就占 970 MiB） |
+| **与 FastSAM-s 并发隔离** | 运行在 `transformers.web.js` 独立运行时中，**不与 `FastSAM-s` 抢锁掉帧** | 与 `FastSAM-s` 共用 `onnxruntime-web` 单一 Emscripten Asyncify 栈，必须全局互斥串行，直接拖垮分割帧率 |
+| **多目标支持** | **原生支持多目标**（同屏多张人脸 / 多个自定义物件全部保留） | 单次 `bbox` 问答默认仅定位单个主目标 |
+| **小众物体与扩展性** | 文本零样本 + **本地标记一次即自动触发 Few-Shot 视觉增强** | 开放世界推理强，但更适合低频/离线决策，而非高频视频门控 |
+
+> 完整架构决策记录（ADR）以及与超轻量专用检测器（BlazeFace / YOLO-World）的进一步对比，已归档在项目知识库 [`.wiki/wiki/semantic-filtering-and-tradeoffs.md`](./.wiki/wiki/semantic-filtering-and-tradeoffs.md)。
+
+---
+
 <a id="zh-ui"></a>
-### 5. 界面各元素功能详解
+### 6. 界面各元素功能详解
 
 #### A. 顶部导航与左右分栏布局
 - **`Name Tag` 选项卡**：固定位于 DSH Web 会话顶部选项卡的最右侧（`order: 999`）。
@@ -211,7 +273,8 @@ pnpm dsh web
 
 #### B. 左侧视窗 — 实时摄像头区域（`CameraViewport`）
 - **实时视频 + 高 DPI 分割叠加层**：实时渲染摄像头画面（默认开启镜像），并覆盖多色实例分割掩码与轮廓线；鼠标悬停会高亮对应块，点击即弹出「目标标记」弹窗。一旦物体在 FAISS 向量库中被认出，画面上会同步在其周围绘制经典的 CV **矩形边界框 + `title` 标题标签**（不受「概率标签」开关影响）。
-- **顶部悬浮 HUD 胶囊**：展示视窗名称、模型状态、点击标记提示、实时分辨率与检测 FPS。
+- **左上方可编辑类别筛选下拉框（`CameraScopeDropdown`）**：内置两个不可编辑、不可删除的固定项 **「所有」** 与 **「人脸」**，支持在输入框中连续输入并按 `Enter` 无限添加自定义目标（自定义项支持行内 `✎` 重命名与 `×` 删除）；输入框正下方内置 **「筛选置信度阈值」** 滑块（`0.00 ~ 1.00`，默认 **`0.50`**，持久化于 `localStorage`）；每次开启摄像头时左上方会弹出 5 秒不可主动关闭的暖金渐变 **Tips 气泡**，并每 1 分钟自动重弹一次。
+- **顶部悬浮 HUD 胶囊**：展示视窗名称、当前语义筛选状态芯片（非「所有」时实时显示命中数与最高分）、模型状态、点击标记提示、实时分辨率与检测 FPS。
 
 #### C. 右侧功能区 — 第一张卡：摄像头、模型与匹配控制卡（`CameraControlStrip`）
 - **主操作按钮行**：
@@ -226,7 +289,7 @@ pnpm dsh web
   - **「清空向量库」**：**仅清空**当前浏览器的 IndexedDB 向量数据库（`dsh-name-tag-vectors`），保留已缓存的模型权重与颗粒度预设。
   - **「清缓存」**：一键清空 `FastSAM-s` IndexedDB 缓存、`EmbeddingGemma 2` 浏览器缓存（`transformers-cache`）、颗粒度参数与已保存预设（`localStorage`）、浏览器向量库（`dsh-name-tag-vectors`）以及口袋内容。
 - **双模型状态与进度条**：分别展示 `FastSAM-s` 与 `EmbeddingGemma 2` 的加载状态及执行后端（`WebGPU` / `WASM`）。
-- **「捕捉匹配相似度阈值」滑块**：会话级临时参数（范围 `0.00 ~ 1.00`，**每次打开默认 `0.78` 且不做持久化缓存**），右侧配有 **「默认」** 快捷重置按钮。
+- **「捕捉匹配相似度阈值」滑块**：专用于「口袋」功能的向量库余弦相似度阈值（范围 `0.00 ~ 1.00`，**默认 `0.78`**，与下拉框内的「筛选置信度阈值」相互独立，均持久化于 `localStorage` 并在「清缓存」时重置），右侧配有 **「默认」** 快捷重置按钮。
 - **「客户端本地存储与缓存位置」折叠子块（默认关闭）**：点击可展开查看浏览器向量库（`IndexedDB dsh-name-tag-vectors` 及目标/向量数统计）、`localStorage` 偏好键名、浏览器模型缓存，以及宿主机只读公共模型镜像路径（无任何用户数据）。
 
 #### D. 右侧功能区 — 第二张卡：「“颗粒度”实时调控面板」（`GranularityCard`）

@@ -435,6 +435,97 @@ test('CameraScopeCollection includes immutable All & Human Face, supports contin
   assert.equal(sanitized.cameraScopes.selectedId, 'human-face')
   assert.equal(sanitized.cameraScopes.customItems.length, 1)
   assert.equal(sanitized.cameraScopes.customItems[0].text, '耳机')
+  assert.equal(sanitized.scopeConfidenceThreshold, 0.5)
+  assert.equal(sanitized.matchThreshold, 0.78)
+
+  // Distinct scopeConfidenceThreshold & matchThreshold both sanitize and persist independently
+  const withThresholds = PreferencesStore.sanitizePreferences({
+    granularity: {
+      preset: 'coarse',
+      comprehensive: 25,
+      containmentThreshold: 0.7,
+      minAreaPercent: 2.0,
+      confThreshold: 0.45,
+      showSuppressed: false,
+    },
+    scopeConfidenceThreshold: 0.64,
+    matchThreshold: 0.85,
+  })
+  assert.equal(withThresholds.scopeConfidenceThreshold, 0.64)
+  assert.equal(withThresholds.matchThreshold, 0.85)
+  const clampedThresholds = PreferencesStore.sanitizePreferences({
+    granularity: {
+      preset: 'coarse',
+      comprehensive: 25,
+      containmentThreshold: 0.7,
+      minAreaPercent: 2.0,
+      confThreshold: 0.45,
+      showSuppressed: false,
+    },
+    scopeConfidenceThreshold: 1.9,
+    matchThreshold: -0.4,
+  })
+  assert.equal(clampedThresholds.scopeConfidenceThreshold, 1)
+  assert.equal(clampedThresholds.matchThreshold, 0)
+})
+
+test('SemanticScopeFilter scores contrastive text+visual prototypes, supports multi-instance tracking, and gates downstream Pocket recognition', async () => {
+  const clientExports = await loadBuiltClientBundle()
+  const { SemanticScopeFilter } = clientExports
+
+  const facePrompts = SemanticScopeFilter.buildPositivePrompts('human-face', '人脸')
+  assert.ok(facePrompts[0].toLowerCase().includes('human face'))
+  const labubuPrompts = SemanticScopeFilter.buildPositivePrompts('custom-1', 'labubu')
+  assert.equal(labubuPrompts[0], 'a photo of labubu')
+
+  const proto = {
+    scopeKey: 'human-face:人脸',
+    positiveTextCentroid: [1, 0, 0],
+    negativeTextVectors: [[0, 1, 0]],
+    visualCentroid: [0, 0, 1],
+  }
+  // Positive text match scores well above 0.50; background match scores well below 0.50; tie === 0.50
+  assert.ok(SemanticScopeFilter.scoreEmbedding([0.9, 0.1, 0], proto) > 0.9)
+  assert.ok(SemanticScopeFilter.scoreEmbedding([0.1, 0.9, 0], proto) < 0.1)
+  assert.ok(Math.abs(SemanticScopeFilter.scoreEmbedding([0.5, 0.5, 0], proto) - 0.5) < 1e-6)
+  // Few-shot visual centroid boosts matching visual objects even when text score is low
+  assert.ok(SemanticScopeFilter.scoreEmbedding([0, 0.1, 0.95], proto) >= 0.95)
+
+  const filter = new SemanticScopeFilter()
+  filter.reset('human-face:人脸')
+  filter.setPrototype(proto)
+
+  const face1 = { id: 'f1', x1: 100, y1: 100, x2: 260, y2: 260, score: 0.92, area: 25600, colorIndex: 0 }
+  const face2 = { id: 'f2', x1: 320, y1: 110, x2: 470, y2: 260, score: 0.90, area: 22500, colorIndex: 1 }
+  const cup = { id: 'cup', x1: 700, y1: 400, x2: 850, y2: 560, score: 0.85, area: 24000, colorIndex: 2 }
+  const live = [face1, face2, cup]
+
+  const cropper = (b) => ({ queryCutoutUrl: 'q:' + b.id, rawPocketUrl: 'r:' + b.id })
+  // Frame 1 & Frame 2 reach STABLE_FRAMES = 2
+  filter.updateFrame(null, live, 1000, 1000, 10_000, () => 50, cropper)
+  assert.equal(filter.getFilteredBoxes(live, 0.5).length, 0)
+  filter.updateFrame(null, live, 1000, 1000, 10_060, () => 60, cropper)
+  const due = filter.collectDueTracks(10_060)
+  assert.equal(due.length, 3)
+
+  // Apply embeddings: face1 & face2 match positive prototype; cup matches background
+  for (const item of due) {
+    const vec = item.box.id === 'cup' ? [0.05, 0.95, 0] : [0.95, 0.05, 0]
+    filter.applyEmbeddingResult(item.trackId, vec, 10_100, 'human-face:人脸')
+    filter.applyPocketMatchResult(item.trackId, true, 't-' + item.box.id, 'Title-' + item.box.id, 10_100)
+  }
+
+  const kept = filter.getFilteredBoxes(live, 0.5)
+  assert.deepEqual(Array.from(kept, (b) => b.id).sort(), ['f1', 'f2'])
+  // Downstream recognized detections exclude cup even though it had a mock Pocket hit
+  const rec = filter.getRecognizedDetections(live, 0.5)
+  assert.deepEqual(Array.from(rec, (r) => r.targetId).sort(), ['t-f1', 't-f2'])
+
+  // Next FastSAM-s frame tracks both faces smoothly via IoU without re-embedding
+  const f1Moved = { ...face1, id: 'f1-next', x1: 112, y1: 105, x2: 272, y2: 265 }
+  const f2Moved = { ...face2, id: 'f2-next', x1: 328, y1: 115, x2: 478, y2: 265 }
+  filter.updateFrame(null, [f1Moved, f2Moved, cup], 1000, 1000, 10_150, () => 55, cropper)
+  assert.deepEqual(Array.from(filter.getFilteredBoxes([f1Moved, f2Moved, cup], 0.5), (b) => b.id).sort(), ['f1-next', 'f2-next'])
 })
 
 test('CameraTipsScheduler shows for 5s on camera start and repeats every 60s until stopped', async () => {

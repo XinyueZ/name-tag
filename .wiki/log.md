@@ -210,3 +210,39 @@ Chronological append-only log of project milestones, ingests, builds, and lint c
 
 ## [2026-11-19] ingest | Upgrade floating Tips bubble to vibrant warm golden-amber gradient
 - Restyled `.nt-scope-tips-bubble`, `::after`, and `.nt-scope-tips-badge` in `src/client/S.js` with a warm sunrise gradient (`#ffe066` -> `#ffb732` -> `#ff9248`), high-contrast `#241400` typography, dark-gold `Tips` badge, spring pop-in animation, and subtle amber glow so it stands out clearly on both dark and light themes.
+
+## [2026-11-19] milestone | Add client-side Valen-Decision-1.5 bbox semantic filter layer & persisted thresholds
+- Installed `@valen-team/sdk@0.4.0`, `@huggingface/jinja@0.5.10`, and `@huggingface/tokenizers@0.2.0`; added `ValenBrowserStub.ts`, inlined 32KB `pillow_resize.wasm` as a base64 data URL, and set `codeSplitting: false` in `tsdown.config.ts` so `lib/client.js` stays a single browser closure with zero Node `require(...)` (`['react', 'react/jsx-runtime']`).
+- Added `ValenGroundingEngine` (`src/client/core/ValenGroundingEngine.ts`) and `ValenScopeFilter` (`src/client/core/ValenScopeFilter.ts`), wiring a strict two-layer pipeline in `NameTagWorkspace.tsx`: `FastSAM-s + GranularityFilter` -> `ValenScopeFilter` (bypassed 100% for 'All'; strict `bbox` matching + IoU tracking for non-'All' scopes feeding downstream overlay, click-to-tag, `ObjectCropTracker`, and Pocket).
+- Loaded Valen together with FastSAM-s and EmbeddingGemma 2 on camera start / Preload Model, added Valen status banner & `Cache (valen-sdk-v2)` visibility + clearing in `CameraControlStrip.tsx` / `handleClearCache`.
+- Added the Valen filter confidence slider directly beneath the `<input>` in `CameraScopeDropdown.tsx` (`scopeConfidenceThreshold`, default `0.50`) and persisted both `scopeConfidenceThreshold` and Pocket's `matchThreshold` (default `0.78`) independently in `PreferencesStore` (`localStorage`).
+- Verified `pnpm run build`, 147 EN/ZH `T.js` keys (0 unused), and `pnpm test` (`21/21` passing).
+
+## [2026-11-19] lint | Add actionable Valen fetch diagnostics and hf-mirror fallback
+- Diagnosed `Valen 加载失败：Failed to fetch` as TLS ClientHello reset (`ENOTCONN`) when reaching `https://huggingface.co` on the current network.
+- Updated `ValenGroundingEngine.initialize()` with automatic `hf-mirror.com` fallback and `formatLoadError()` exposing the exact failing stage, asset, and URL; documented in `wiki/troubleshooting.md`.
+
+## [2026-11-19] lint | Fix Valen WebGPU setPipeline crash on 970 MiB embedding graph
+- Added `ValenCpuEmbeddingSession` in `src/client/core/ValenGroundingEngine.ts` to execute Valen's `Gather(axis=0)` embedding lookup bit-exactly in JS (<1 ms, 0 GPU VRAM, 0 WASM heap) while keeping `vision`, `decision`, and `grounding` on WebGPU.
+- Added automatic WebGPU -> WASM fallback in `ValenGroundingEngine.initialize()` and sequenced `ensureValenReady()` after `ensureModelReady()` in `NameTagWorkspace.tsx` to avoid concurrent ORT WebGPU init races.
+- Added `ValenCpuEmbeddingSession` unit test (`21/21` passing) and documented root cause in `wiki/troubleshooting.md`.
+
+## [2026-11-19] lint | Deduplicate onnxruntime-web to 1.31.1 in tsdown.config.ts to fix Valen WASM/WebGPU ABI mismatch
+- Diagnosed both `setPipeline` and `memory access out of bounds [error: vision]` as an Emscripten JS/WASM ABI mismatch caused by `@valen-team/sdk` bundling `onnxruntime-web@1.31.0-dev` against `/api/name-tag/ort/` serving `1.31.1` `.wasm` binaries.
+- Aliased `onnxruntime-web`, `onnxruntime-web/webgpu`, and `onnxruntime-web/wasm` in `tsdown.config.ts` to the single canonical `1.31.1` build (`ortHeaders: ['ONNX Runtime Web v1.31.1']`, bundle shrunk from 2.63 MB to 2.47 MB), and surfaced both WebGPU + WASM error details in `ValenGroundingEngine.initialize()`.
+
+## [2026-11-19] lint | Serialize FastSAM-s and Valen ORT Asyncify calls via OrtExecutionMutex
+- Verified `vision.onnx`, `web-portable-decision.onnx`, and `grounding.onnx` all load and run cleanly in `onnxruntime-web@1.31.1` (`ort.webgpu.bundle.min.mjs`) when not racing concurrent WebGPU Asyncify calls.
+- Added `OrtExecutionMutex` (`src/client/core/OrtExecutionMutex.ts`) and guarded all ORT `InferenceSession.create` / `session.run` calls in `FastSamInferenceEngine.ts` and `ValenGroundingEngine.ts` to prevent Emscripten Asyncify stack corruption (`memory access out of bounds [error: vision]`).
+- Added `OrtExecutionMutex` FIFO serialization unit test (`21/21` passing) and updated `wiki/architecture.md` & `wiki/troubleshooting.md`.
+
+## [2026-11-19] milestone | Replace Valen 0.8B with real-time EmbeddingGemma 2 SemanticScopeFilter
+- Uninstalled `@valen-team/sdk`, `@huggingface/jinja`, `@huggingface/tokenizers` and removed `ValenGroundingEngine.ts`, `ValenScopeFilter.ts`, `ValenBrowserStub.ts`, and `OrtExecutionMutex.ts`, restoring `FastSamInferenceEngine` to full unblocked FPS (`lib/client.js` shrunk to 2.18 MB).
+- Added `SemanticScopeFilter` (`src/client/core/SemanticScopeFilter.ts`) and `BrowserTargetVectorRepository.getVectorsByTitle()` (`src/client/core/BrowserVectorStore.ts`): computes contrastive positive/negative text prototypes (`a photo of ...`, `a close-up of ...`, raw text vs background prompts) + optional few-shot visual centroid fusion from local IndexedDB vector store.
+- Wired one-vector-two-uses pipeline in `NameTagWorkspace.tsx`: `'All'` remains 100% unchanged; non-`'All'` scopes track multiple live instances via IoU, score each track once per 2s via `EmbeddingGemma 2`, gate canvas overlay / click-to-tag / Pocket strictly to passed tracks (`score >= scopeConfidenceThreshold`), and reuse the exact same 768-d image vector for Pocket vector search.
+- Cleaned up `CameraControlStrip.tsx` and `T.js` (141 EN/ZH keys in parity, 0 unused), updated unit tests (`21/21` passing), and recorded `raw/013-embeddinggemma2-realtime-scope-filter.md`.
+
+## [2026-11-19] ingest | Document post-segmentation semantic filter & Valen trade-offs in README and wiki
+- Rendered 2x Retina diagram `assets/semantic-filter-pipeline.png` illustrating the two-layer filtering architecture (`GranularityFilter` -> `SemanticScopeFilter`), contrastive margin scoring, few-shot fusion, and one-vector-two-uses Pocket pipeline.
+- Added maintained wiki page `wiki/semantic-filtering-and-tradeoffs.md` (indexed in `.wiki/index.md` and cross-linked from `wiki/architecture.md`) detailing the ADR & empirical trade-offs against standalone VLMs such as `Valen-Team/valen-sdk-js`.
+- Updated `README.md` (both EN and ZH sections + TOC) with the new PNG diagram, dedicated filter architecture & model trade-off section (with `https://github.com/Valen-Team/valen-sdk-js` link), and refreshed UI reference for `CameraScopeDropdown` and persisted thresholds.

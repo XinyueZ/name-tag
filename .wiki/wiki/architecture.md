@@ -26,7 +26,8 @@ All runtime logic is encapsulated in single-responsibility classes under `src/cl
 - `SavedPresetModels` (`src/client/core/SavedPresetModels.ts`): OOP domain classes `SavedPresetItem` (`id`, `text`, `selected`, `settings`) and `GranularitySettings`.
 - `CameraScopeModels` (`src/client/core/CameraScopeModels.ts`): Immutable OOP domain classes `CameraScopeItem` (with protected built-in `ALL_ID = 'all'` and `HUMAN_FACE_ID = 'human-face'`) and `CameraScopeCollection` managing unbounded user-added camera dropdown entries, selection, inline renames, and safe deletion.
 - `CameraTipsScheduler` (`src/client/core/CameraTipsScheduler.ts`): OOP timer coordinator driving the non-dismissible floating Tips bubble (5s visible burst on every camera start, repeating every 60s until camera stop).
-- `PreferencesStore` (`src/client/core/PreferencesStore.ts`): 100% browser-local persistence (`localStorage`) for Granularity panel state, card collapse, `SavedPresetItem` list, and `CameraScopeCollection` state.
+- `PreferencesStore` (`src/client/core/PreferencesStore.ts`): 100% browser-local persistence (`localStorage`) for Granularity panel state, card collapse, `SavedPresetItem` list, `CameraScopeCollection` state, semantic filter `scopeConfidenceThreshold` (default `0.50`), and Pocket `matchThreshold` (default `0.78`).
+- `SemanticScopeFilter` (`src/client/core/SemanticScopeFilter.ts`): Real-time semantic filtering layer positioned above `GranularityFilter` reusing `EmbeddingGemma 2`'s shared 768-d Vision+Text space (contrastive positive/negative prompt scoring + optional few-shot visual centroid fusion from `BrowserTargetVectorRepository`), supporting multi-instance IoU tracking and one-vector-two-uses downstream Pocket search.
 - `Gemma2EmbeddingEngine` & `Gemma2LangChainEmbeddings` (`src/client/core/Gemma2EmbeddingEngine.ts`): Client-side EmbeddingGemma 2 (`onnx-community/embeddinggemma-2-ONNX`) encoder & LangChain `Embeddings` subclass.
 - `IndexedDbLangChainVectorStore` & `BrowserTargetVectorRepository` (`src/client/core/BrowserVectorStore.ts`): 100% browser-local LangChain `VectorStore` persisted in Browser IndexedDB (`dsh-name-tag-vectors`), storing 6-vector target indices + metadata with zero server state.
 - `VectorTableFormatter` (`src/client/core/VectorTableFormatter.ts`) & `VectorDbModal` (`src/client/components/VectorDbModal.tsx`): 5-column database inspector (`index`, `augmentation`, `title`, `description`, `timestamp`) with 5-head/5-tail vector formatting and resizable `title`/`description` columns.
@@ -46,5 +47,6 @@ All runtime logic is encapsulated in single-responsibility classes under `src/cl
 ## Related Pages
 - [Model Lazy-Load & FastSAM-s Contract](./model-lazyload-and-fastsam.md)
 - [Granularity Engine](./granularity-engine.md)
+- [Post-Segmentation Semantic Filtering & Trade-offs](./semantic-filtering-and-tradeoffs.md)
 - [UI & Design System](./ui-and-design-system.md)
 - [Progress & Roadmap](./progress-and-roadmap.md)

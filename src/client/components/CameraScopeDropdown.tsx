@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { DEFAULT_SCOPE_CONFIDENCE_THRESHOLD } from '../../invariant'
 import { CameraScopeCollection, type CameraScopeAddStatus, type CameraScopeItem } from '../core/CameraScopeModels'
 import { CameraTipsScheduler } from '../core/CameraTipsScheduler'
 import type { LocaleService } from '../core/LocaleService'
@@ -6,6 +7,8 @@ import type { LocaleService } from '../core/LocaleService'
 export interface CameraScopeDropdownProps {
   readonly collection: CameraScopeCollection
   readonly cameraActive: boolean
+  readonly scopeConfidenceThreshold: number
+  readonly onScopeConfidenceThresholdChange: (value: number) => void
   readonly locale: LocaleService
   readonly onAdd: (text: string) => CameraScopeAddStatus
   readonly onSelect: (id: string) => void
@@ -207,6 +210,39 @@ export function CameraScopeDropdown(props: CameraScopeDropdownProps): React.JSX.
               {props.locale.translate(feedbackKey)}
             </div>
           ) : null}
+
+          <div className="nt-scope-threshold-box">
+            <div className="nt-scope-threshold-head">
+              <span className="nt-scope-threshold-label">
+                {props.locale.translate('scope.thresholdLabel')}
+              </span>
+              <span className="nt-scope-threshold-right">
+                <span className="nt-scope-threshold-badge">
+                  {props.scopeConfidenceThreshold.toFixed(2)}
+                </span>
+                <button
+                  type="button"
+                  className="nt-mini-btn"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    props.onScopeConfidenceThresholdChange(DEFAULT_SCOPE_CONFIDENCE_THRESHOLD)
+                  }}
+                >
+                  {props.locale.translate('scope.thresholdReset')}
+                </button>
+              </span>
+            </div>
+            <input
+              type="range"
+              className="nt-scope-threshold-slider"
+              min={0}
+              max={1}
+              step={0.01}
+              value={props.scopeConfidenceThreshold}
+              aria-label={props.locale.translate('scope.thresholdLabel')}
+              onChange={(e) => props.onScopeConfidenceThresholdChange(Number(e.target.value))}
+            />
+          </div>
 
           <div ref={listRef} className="nt-scope-list" role="listbox" aria-label={props.locale.translate('scope.dropdownAria')}>
             {allItems.map((item) => {

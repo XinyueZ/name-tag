@@ -19,11 +19,14 @@ Content catalog for the **`name-tag`** DSH Web plugin project. Read this index f
 - [009-crop-quality-and-track-stability.md](./raw/009-crop-quality-and-track-stability.md) — 12% padded dilated crop, Laplacian sharpness scoring, and multi-frame ObjectCropTracker.
 - [010-camera-scope-editable-dropdown.md](./raw/010-camera-scope-editable-dropdown.md) — Top-left editable camera dropdown with immutable default “所有” (All), continuous Enter-to-add input, and per-item `×` deletion.
 - [011-human-face-scope-and-tips-bubble.md](./raw/011-human-face-scope-and-tips-bubble.md) — Built-in immutable “人脸” (Human Face) option and non-dismissible 5s/60s floating Tips bubble on camera start.
+- [012-valen-bbox-semantic-filter-layer.md](./raw/012-valen-bbox-semantic-filter-layer.md) — (Superseded) Initial Valen-Decision-1.5 `bbox` filtering experiment, dropdown confidence slider, and persisted thresholds.
+- [013-embeddinggemma2-realtime-scope-filter.md](./raw/013-embeddinggemma2-realtime-scope-filter.md) — Real-time `EmbeddingGemma 2` contrastive Vision+Text semantic scope filter with few-shot visual fusion and one-vector-two-uses Pocket pipeline.
 
 ## Wiki Pages (Maintained)
 - [architecture.md](./wiki/architecture.md) — Dual-face DSH plugin structure, OOP classes, and atomic component hierarchy.
 - [model-lazyload-and-fastsam.md](./wiki/model-lazyload-and-fastsam.md) — 3-tier lazy-load cache pipeline (IndexedDB -> Host disk -> HF) and FastSAM-s tensor contracts.
 - [granularity-engine.md](./wiki/granularity-engine.md) — Containment NMS algorithm, presets, and comprehensive granularity slider formulas.
+- [semantic-filtering-and-tradeoffs.md](./wiki/semantic-filtering-and-tradeoffs.md) — Post-segmentation `SemanticScopeFilter` math, one-vector-two-uses pipeline, and architectural trade-offs vs standalone VLMs (`Valen-Team/valen-sdk-js`).
 - [ui-and-design-system.md](./wiki/ui-and-design-system.md) — Split-pane handle layout, pure MD3 tokens in `S.js`, `T.js` bilingual i18n, and bbox styling.
 - [progress-and-roadmap.md](./wiki/progress-and-roadmap.md) — Current Phase 1 implementation checklist and future embedding/vector-DB phases.
 - [troubleshooting.md](./wiki/troubleshooting.md) — Dual-face host route skew (`404 not found` JSON error), browser bundling fixes, and ORT path resolution lessons.

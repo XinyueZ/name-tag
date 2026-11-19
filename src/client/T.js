@@ -42,6 +42,12 @@ export class TranslationCatalog {
     'scope.reservedBuiltInHint': '该项为默认内置固定项',
     'scope.tipsBadge': 'Tips',
     'scope.tipsText': '可切换「所有 / 人脸」或输入自定义项按回车添加',
+    'scope.thresholdLabel': '筛选置信度阈值',
+    'scope.thresholdReset': '默认',
+    'scope.hudLoading': '等待嵌入模型 · 筛选：{scope}',
+    'scope.hudScanning': '正在筛选：{scope}...',
+    'scope.hudMatched': '已筛选：{scope} · {count} 个 ({pct}%)',
+    'scope.hudNotFound': '未发现：{scope}',
 
     // FastSAM-s & EmbeddingGemma 2 Models & Storage
     'model.label': 'FastSAM-s 模型',
@@ -197,6 +203,12 @@ export class TranslationCatalog {
     'scope.reservedBuiltInHint': 'This is a built-in default item',
     'scope.tipsBadge': 'Tips',
     'scope.tipsText': 'Switch "All / Human Face" or type & press Enter to add',
+    'scope.thresholdLabel': 'Filter Confidence',
+    'scope.thresholdReset': 'Default',
+    'scope.hudLoading': 'Waiting for Embedding · Scope: {scope}',
+    'scope.hudScanning': 'Filtering: {scope}...',
+    'scope.hudMatched': 'Filtered: {scope} · {count} ({pct}%)',
+    'scope.hudNotFound': 'Not found: {scope}',
 
     // FastSAM-s & EmbeddingGemma 2 Models & Storage
     'model.label': 'FastSAM-s Model',
